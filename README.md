@@ -48,7 +48,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: AI Code Review
-        uses: clearideas/ai-code-review-github-action@v1.0.5
+        uses: clearideas/ai-code-review-github-action@v1.0.7
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           openai_api_key: ${{ secrets.OPENAI_API_KEY }}
@@ -56,6 +56,14 @@ jobs:
           ai_model: 'gpt-5-mini'
           max_diff_chars: '180000'
           fail_on_severity: '["high","critical","security"]'
+      
+      # Optional: Upload the detailed JSON report as an artifact
+      - name: Upload AI Review Report
+        if: always()  # Upload even if the review fails
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-review-report
+          path: ai-review-report-*.json
 ```
 
 ## Inputs
