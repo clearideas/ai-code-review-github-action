@@ -10,6 +10,16 @@ Automated AI-powered code review using OpenAI GPT models for GitHub pull request
 - 💬 Automatic PR comments with findings
 - 📋 JSON artifacts for audit trails
 
+## Changelog
+
+### v1.0.1 (Latest)
+- **Fixed:** Resolved `ERR_MODULE_NOT_FOUND` error when action is invoked from other repositories
+- **Improved:** Bundled all dependencies into single file for better reliability
+- **Added:** Build process with @vercel/ncc for dependency bundling
+
+### v1.0.0
+- Initial release with AI-powered code review functionality
+
 ## Usage
 
 Add this to your repository's `.github/workflows/ai-code-review.yml`:
@@ -32,7 +42,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: AI Code Review
-        uses: clearideas/ai-code-review-github-action@v1
+        uses: clearideas/ai-code-review-github-action@v1.0.1
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           # Optional customization:
