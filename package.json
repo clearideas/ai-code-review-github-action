@@ -3,9 +3,8 @@
     "version": "1.0.1",
     "description": "AI-powered code review GitHub Action",
     "main": "src/review.js",
-    "type": "module",
     "scripts": {
-        "build": "ncc build src/review.js -o dist --minify",
+        "build": "esbuild src/review.js --bundle --platform=node --target=node20 --format=cjs --outfile=dist/index.js --banner:js=\"#!/usr/bin/env node\" --external:node:fs --external:node:path --external:node:stream --external:node:util --external:node:crypto --external:node:http --external:node:https --external:node:url --external:node:os",
         "test": "echo \"Error: no test specified\" && exit 1"
     },
     "dependencies": {
@@ -22,6 +21,6 @@
     ],
     "license": "MIT",
     "devDependencies": {
-        "@vercel/ncc": "^0.38.3"
+        "esbuild": "^0.25.9"
     }
 }
