@@ -12,7 +12,12 @@ Automated AI-powered code review using OpenAI GPT models for GitHub pull request
 
 ## Changelog
 
-### v1.0.1 (Latest)
+### v1.0.2 (Latest)
+- **Fixed:** Resolved `__classPrivateFieldGet` and dynamic require bundling errors
+- **Improved:** Migrated from @vercel/ncc to esbuild for faster and more reliable bundling
+- **Fixed:** Proper Node.js 20 compatibility with CommonJS format
+
+### v1.0.1
 - **Fixed:** Resolved `ERR_MODULE_NOT_FOUND` error when action is invoked from other repositories
 - **Improved:** Bundled all dependencies into single file for better reliability
 - **Added:** Build process with @vercel/ncc for dependency bundling
@@ -42,7 +47,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: AI Code Review
-        uses: clearideas/ai-code-review-github-action@v1.0.1
+        uses: clearideas/ai-code-review-github-action@v1.0.2
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           # Optional customization:
