@@ -10,7 +10,6 @@ inputs:
   github-token:
     description: 'GitHub token for API access'
     required: true
-    default: ${{ github.token }}
   
   openai-api-key:
     description: 'OpenAI API key for AI model access'

@@ -12,7 +12,11 @@ Automated AI-powered code review using OpenAI GPT models for GitHub pull request
 
 ## Changelog
 
-### v1.0.2 (Latest)
+### v1.0.3 (Latest)
+- **Fixed:** Removed invalid default value in action.yml that was preventing github-token input from working properly
+- **Critical:** This fixes the "Missing github-token input" error that users were experiencing
+
+### v1.0.2
 - **Fixed:** Resolved `__classPrivateFieldGet` and dynamic require bundling errors
 - **Improved:** Migrated from @vercel/ncc to esbuild for faster and more reliable bundling
 - **Fixed:** Proper Node.js 20 compatibility with CommonJS format
@@ -48,7 +52,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: AI Code Review
-        uses: clearideas/ai-code-review-github-action@v1.0.2
+        uses: clearideas/ai-code-review-github-action@v1.0.3
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
