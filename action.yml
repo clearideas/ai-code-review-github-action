@@ -7,25 +7,25 @@ branding:
   color: 'blue'
 
 inputs:
-  github-token:
+  github_token:
     description: 'GitHub token for API access'
     required: true
   
-  openai-api-key:
+  openai_api_key:
     description: 'OpenAI API key for AI model access'
     required: true
   
-  ai-model:
+  ai_model:
     description: 'OpenAI model to use for code review'
     required: false
     default: 'gpt-5-mini'
   
-  max-diff-chars:
+  max_diff_chars:
     description: 'Maximum number of characters in diff to send to AI'
     required: false
     default: '180000'
   
-  fail-on-severity:
+  fail_on_severity:
     description: 'JSON array of severities that should fail the check'
     required: false
     default: '["high","critical","security"]'

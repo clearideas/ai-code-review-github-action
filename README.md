@@ -48,25 +48,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: AI Code Review
-        uses: clearideas/ai-code-review-github-action@v1.0.4
+        uses: clearideas/ai-code-review-github-action@v1.0.5
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          openai_api_key: ${{ secrets.OPENAI_API_KEY }}
           # Optional customization:
-          ai-model: 'gpt-5-mini'
-          max-diff-chars: '180000'
-          fail-on-severity: '["high","critical","security"]'
+          ai_model: 'gpt-5-mini'
+          max_diff_chars: '180000'
+          fail_on_severity: '["high","critical","security"]'
 ```
 
 ## Inputs
 
 | Input | Description | Required | Default |
 |-------|-------------|----------|---------|
-| `github-token` | GitHub token for API access | Yes | `${{ secrets.GITHUB_TOKEN }}` |
-| `openai-api-key` | OpenAI API key | Yes | - |
-| `ai-model` | OpenAI model to use | No | `gpt-5-mini` |
-| `max-diff-chars` | Max characters in diff | No | `180000` |
-| `fail-on-severity` | Severities that fail the check | No | `["high","critical","security"]` |
+| `github_token` | GitHub token for API access | Yes | `${{ secrets.GITHUB_TOKEN }}` |
+| `openai_api_key` | OpenAI API key | Yes | - |
+| `ai_model` | OpenAI model to use | No | `gpt-5-mini` |
+| `max_diff_chars` | Max characters in diff | No | `180000` |
+| `fail_on_severity` | Severities that fail the check | No | `["high","critical","security"]` |
 
 ## Setup
 
@@ -75,7 +75,7 @@ jobs:
 3. **Create Workflow**: Create the workflow file as shown above
 4. The action will automatically run on pull requests
 
-**Note:** Make sure to include both `github-token` and `openai-api-key` in your workflow's `with:` section.
+**Note:** Make sure to include both `github_token` and `openai_api_key` in your workflow's `with:` section.
 
 ## Security
 

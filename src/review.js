@@ -13,8 +13,8 @@ const {
   GITHUB_REPOSITORY,
 } = process.env
 
-if (!GITHUB_TOKEN) throw new Error('Missing github-token input')
-if (!OPENAI_API_KEY) throw new Error('Missing openai-api-key input')
+if (!GITHUB_TOKEN) throw new Error('Missing github_token input')
+if (!OPENAI_API_KEY) throw new Error('Missing openai_api_key input')
 if (!GITHUB_REPOSITORY || !GITHUB_REPOSITORY.includes('/')) {
   throw new Error('Missing or invalid GITHUB_REPOSITORY (expected owner/repo)')
 }
