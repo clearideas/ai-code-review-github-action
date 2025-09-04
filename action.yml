@@ -18,12 +18,12 @@ inputs:
   ai_model:
     description: 'OpenAI model to use for code review'
     required: false
-    default: 'gpt-5-mini'
+    default: gpt-5-mini
   
   max_diff_chars:
     description: 'Maximum number of characters in diff to send to AI'
     required: false
-    default: '180000'
+    default: 180000
   
   fail_on_severity:
     description: 'JSON array of severities that should fail the check'

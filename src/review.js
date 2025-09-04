@@ -337,6 +337,7 @@ ${diff}
       },
     ]
 
+    console.log('🤖 AI Model being used:', AI_MODEL);
     const ai = await openai.chat.completions.create({
       model: AI_MODEL,
       messages: [{ role: 'system', content: system }, ...user],
