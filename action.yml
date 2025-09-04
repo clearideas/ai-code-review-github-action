@@ -1,0 +1,36 @@
+name: 'AI Code Review'
+description: 'Automated AI-powered code review using OpenAI GPT models'
+author: 'Clear Ideas Incorporated'
+
+branding:
+  icon: 'eye'
+  color: 'blue'
+
+inputs:
+  github-token:
+    description: 'GitHub token for API access'
+    required: true
+    default: ${{ github.token }}
+  
+  openai-api-key:
+    description: 'OpenAI API key for AI model access'
+    required: true
+  
+  ai-model:
+    description: 'OpenAI model to use for code review'
+    required: false
+    default: 'gpt-5-mini'
+  
+  max-diff-chars:
+    description: 'Maximum number of characters in diff to send to AI'
+    required: false
+    default: '180000'
+  
+  fail-on-severity:
+    description: 'JSON array of severities that should fail the check'
+    required: false
+    default: '["high","critical","security"]'
+
+runs:
+  using: 'node20'
+  main: 'src/review.js'
