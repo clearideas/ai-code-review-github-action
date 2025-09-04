@@ -48,7 +48,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: AI Code Review
-        uses: clearideas/ai-code-review-github-action@v1.0.2
+        uses: clearideas/ai-code-review-github-action@v1.0.4
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
