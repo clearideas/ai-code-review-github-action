@@ -5,6 +5,7 @@
     "main": "src/review.js",
     "type": "module",
     "scripts": {
+        "build": "ncc build src/review.js -o dist --minify",
         "test": "echo \"Error: no test specified\" && exit 1"
     },
     "dependencies": {
@@ -19,5 +20,8 @@
         "openai",
         "clearideas"
     ],
-    "license": "MIT"
+    "license": "MIT",
+    "devDependencies": {
+        "@vercel/ncc": "^0.38.3"
+    }
 }
