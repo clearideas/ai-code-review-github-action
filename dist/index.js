@@ -21378,9 +21378,14 @@ ${diff}
         ]
       };
     }
-    const reportPath = `/tmp/ai-review-report-${Date.now()}.json`;
+    const reportPath = `ai-review-report-${Date.now()}.json`;
     import_node_fs2.default.writeFileSync(reportPath, JSON.stringify(parsed, null, 2));
     console.log(`AI review report written to: ${reportPath}`);
+    console.log(`\u{1F4C4} To download as artifact, add this step to your workflow:`);
+    console.log(`   - uses: actions/upload-artifact@v4`);
+    console.log(`     with:`);
+    console.log(`       name: ai-review-report`);
+    console.log(`       path: ${reportPath}`);
     const marker = "<!-- ai-code-review-bot -->";
     const bodyMd = `${marker}
 ${asMarkdown(parsed)}

@@ -370,9 +370,14 @@ ${diff}
     }
 
     // 3) Persist raw JSON report for auditors
-    const reportPath = `/tmp/ai-review-report-${Date.now()}.json`
+    const reportPath = `ai-review-report-${Date.now()}.json`
     fs.writeFileSync(reportPath, JSON.stringify(parsed, null, 2))
     console.log(`AI review report written to: ${reportPath}`)
+    console.log(`📄 To download as artifact, add this step to your workflow:`)
+    console.log(`   - uses: actions/upload-artifact@v4`)
+    console.log(`     with:`)
+    console.log(`       name: ai-review-report`)
+    console.log(`       path: ${reportPath}`)
 
     // 4) Post (or update) a single summary comment
     const marker = '<!-- ai-code-review-bot -->'
