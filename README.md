@@ -16,6 +16,7 @@ Automated AI-powered code review using OpenAI GPT models for GitHub pull request
 - **Fixed:** Resolved `__classPrivateFieldGet` and dynamic require bundling errors
 - **Improved:** Migrated from @vercel/ncc to esbuild for faster and more reliable bundling
 - **Fixed:** Proper Node.js 20 compatibility with CommonJS format
+- **Fixed:** Updated README to include required `github-token` input in usage examples
 
 ### v1.0.1
 - **Fixed:** Resolved `ERR_MODULE_NOT_FOUND` error when action is invoked from other repositories
@@ -49,6 +50,7 @@ jobs:
       - name: AI Code Review
         uses: clearideas/ai-code-review-github-action@v1.0.2
         with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           # Optional customization:
           ai-model: 'gpt-5-mini'
@@ -60,7 +62,7 @@ jobs:
 
 | Input | Description | Required | Default |
 |-------|-------------|----------|---------|
-| `github-token` | GitHub token for API access | No | `${{ github.token }}` |
+| `github-token` | GitHub token for API access | Yes | `${{ secrets.GITHUB_TOKEN }}` |
 | `openai-api-key` | OpenAI API key | Yes | - |
 | `ai-model` | OpenAI model to use | No | `gpt-5-mini` |
 | `max-diff-chars` | Max characters in diff | No | `180000` |
@@ -68,9 +70,12 @@ jobs:
 
 ## Setup
 
-1. Add `OPENAI_API_KEY` to your repository secrets
-2. Create the workflow file as shown above
-3. The action will automatically run on pull requests
+1. **Add OpenAI API Key**: Add `OPENAI_API_KEY` to your repository secrets
+2. **GitHub Token**: The action uses `${{ secrets.GITHUB_TOKEN }}` which is automatically available in all GitHub workflows
+3. **Create Workflow**: Create the workflow file as shown above
+4. The action will automatically run on pull requests
+
+**Note:** Make sure to include both `github-token` and `openai-api-key` in your workflow's `with:` section.
 
 ## Security
 
