@@ -10,21 +10,6 @@ Automated AI-powered code review using OpenAI GPT models for GitHub pull request
 - 💬 Automatic PR comments with findings
 - 📋 JSON artifacts for audit trails
 
-## Changelog
-
-### v1.0.2 (Latest)
-- **Fixed:** Resolved `__classPrivateFieldGet` and dynamic require bundling errors
-- **Improved:** Migrated from @vercel/ncc to esbuild for faster and more reliable bundling
-- **Fixed:** Proper Node.js 20 compatibility with CommonJS format
-- **Fixed:** Updated README to include required `github-token` input in usage examples
-
-### v1.0.1
-- **Fixed:** Resolved `ERR_MODULE_NOT_FOUND` error when action is invoked from other repositories
-- **Improved:** Bundled all dependencies into single file for better reliability
-- **Added:** Build process with @vercel/ncc for dependency bundling
-
-### v1.0.0
-- Initial release with AI-powered code review functionality
 
 ## Usage
 
