@@ -67,6 +67,7 @@ const ReviewShape = z.object({
 })
 
 // Convert zod schema to JSON Schema for OpenAI structured outputs
+// Note: With strict mode, all properties must be required, so we use null for optional fields
 const reviewJsonSchema = {
   type: "object",
   properties: {
@@ -90,8 +91,8 @@ const reviewJsonSchema = {
             description: "Path to the file where the issue was found"
           },
           line: {
-            type: "integer",
-            description: "Line number where the issue occurs (optional)"
+            type: ["integer", "null"],
+            description: "Line number where the issue occurs (null if not applicable)"
           },
           severity: {
             type: "string",
@@ -107,16 +108,16 @@ const reviewJsonSchema = {
             description: "Detailed explanation of the issue"
           },
           suggestion: {
-            type: "string",
-            description: "Actionable suggestion to fix the issue (optional)"
+            type: ["string", "null"],
+            description: "Actionable suggestion to fix the issue (null if not applicable)"
           },
           tags: {
-            type: "array",
+            type: ["array", "null"],
             items: { type: "string" },
-            description: "Optional tags for categorizing the issue"
+            description: "Optional tags for categorizing the issue (null if not applicable)"
           }
         },
-        required: ["file", "severity", "title", "detail"],
+        required: ["file", "line", "severity", "title", "detail", "suggestion", "tags"],
         additionalProperties: false
       }
     }
@@ -367,7 +368,14 @@ TONE: Assume the developer is competent. If you're not sure about an issue, don'
 RESPONSE FORMAT: Your response will be automatically structured according to the defined schema. Provide:
 - summary: Brief, encouraging overview of the code review
 - overall_risk: Assessment of the overall risk level (low/medium/high/critical)
-- issues: Array of specific issues found, each with file path, optional line number, severity level, title, detailed explanation, and optional suggestion
+- issues: Array of specific issues found, each with:
+  - file: Path to the file where the issue was found
+  - line: Line number (use null if not applicable to a specific line)
+  - severity: Severity level (info/low/medium/high/critical/security)
+  - title: Clear, specific title of the issue
+  - detail: Detailed explanation of the issue
+  - suggestion: Actionable suggestion to fix the issue (use null if no suggestion)
+  - tags: Array of tags for categorizing the issue (use null if no tags)
 
 If everything looks good, provide a positive summary with "low" overall_risk and an empty issues array.`
 
