@@ -394,22 +394,43 @@ ${diff}
     ]
 
     console.log('🤖 AI Model being used:', AI_MODEL);
-    const ai = await openai.chat.completions.create({
-      model: AI_MODEL,
-      messages: [{ role: 'system', content: system }, ...user],
-      max_completion_tokens: 4000,
-      response_format: {
-        type: "json_schema",
-        json_schema: {
-          name: "code_review_response",
-          description: "AI code review analysis with structured output",
-          schema: reviewJsonSchema,
-          strict: true
+    let ai
+    try {
+      ai = await openai.chat.completions.create({
+        model: AI_MODEL,
+        messages: [{ role: 'system', content: system }, ...user],
+        response_format: {
+          type: "json_schema",
+          json_schema: {
+            name: "code_review_response",
+            description: "AI code review analysis with structured output",
+            schema: reviewJsonSchema,
+            strict: true
+          }
         }
-      }
-    })
+      })
+    } catch (apiError) {
+      console.error('❌ OpenAI API call failed:', apiError.message)
+      throw new Error(`OpenAI API call failed: ${apiError.message}`)
+    }
 
-    const text = ai.choices?.[0]?.message?.content ?? '{}'
+    // Better logging for debugging
+    if (!ai.choices || ai.choices.length === 0) {
+      throw new Error('AI response missing choices array')
+    }
+    
+    if (!ai.choices[0]?.message?.content) {
+      console.error('❌ Unexpected AI response structure:', JSON.stringify(ai, null, 2))
+      throw new Error('AI response missing message content')
+    }
+    
+    const text = ai.choices[0].message.content
+    console.log('📝 AI Response length:', text.length)
+    console.log('📝 AI Response preview:', text.slice(0, 100) + (text.length > 100 ? '...' : ''))
+    
+    if (!text || text.trim() === '') {
+      throw new Error('AI returned empty response')
+    }
     let parsed
     try {
       // With structured outputs, the response should always be valid JSON conforming to our schema
