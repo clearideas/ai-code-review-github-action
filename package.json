@@ -1,6 +1,6 @@
 {
     "name": "ai-code-review-github-action",
-    "version": "1.0.8",
+    "version": "1.0.9",
     "description": "AI-powered code review GitHub Action",
     "main": "src/review.js",
     "scripts": {

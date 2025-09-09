@@ -66,6 +66,66 @@ const ReviewShape = z.object({
   issues: z.array(Issue).default([]),
 })
 
+// Convert zod schema to JSON Schema for OpenAI structured outputs
+// Note: With strict mode, all properties must be required, so we use null for optional fields
+const reviewJsonSchema = {
+  type: "object",
+  properties: {
+    summary: {
+      type: "string",
+      description: "Brief, encouraging overview of the code review"
+    },
+    overall_risk: {
+      type: "string",
+      enum: ["low", "medium", "high", "critical"],
+      description: "Overall risk assessment of the changes"
+    },
+    issues: {
+      type: "array",
+      description: "Array of issues found in the code",
+      items: {
+        type: "object",
+        properties: {
+          file: {
+            type: "string",
+            description: "Path to the file where the issue was found"
+          },
+          line: {
+            type: ["integer", "null"],
+            description: "Line number where the issue occurs (null if not applicable)"
+          },
+          severity: {
+            type: "string",
+            enum: ["info", "low", "medium", "high", "critical", "security"],
+            description: "Severity level of the issue"
+          },
+          title: {
+            type: "string",
+            description: "Clear, specific title of the issue"
+          },
+          detail: {
+            type: "string",
+            description: "Detailed explanation of the issue"
+          },
+          suggestion: {
+            type: ["string", "null"],
+            description: "Actionable suggestion to fix the issue (null if not applicable)"
+          },
+          tags: {
+            type: ["array", "null"],
+            items: { type: "string" },
+            description: "Optional tags for categorizing the issue (null if not applicable)"
+          }
+        },
+        required: ["file", "line", "severity", "title", "detail", "suggestion", "tags"],
+        additionalProperties: false
+      }
+    }
+  },
+  required: ["summary", "overall_risk", "issues"],
+  additionalProperties: false
+}
+
 let failOn
 try {
   const parsed = JSON.parse(FAIL_ON_SEVERITY)
@@ -305,23 +365,19 @@ WHAT TO LOOK FOR (only flag if you're confident):
 
 TONE: Assume the developer is competent. If you're not sure about an issue, don't report it.
 
-Return JSON only:
-{
-  "summary": "Brief, encouraging overview",
-  "overall_risk": "low"|"medium"|"high"|"critical", 
-  "issues": [
-    {
-      "file": "path/to/file",
-      "line": 123,
-      "severity": "info"|"low"|"medium"|"high"|"critical"|"security",
-      "title": "Clear, specific issue",
-      "detail": "Helpful explanation",
-      "suggestion": "Actionable fix"
-    }
-  ]
-}
+RESPONSE FORMAT: Your response will be automatically structured according to the defined schema. Provide:
+- summary: Brief, encouraging overview of the code review
+- overall_risk: Assessment of the overall risk level (low/medium/high/critical)
+- issues: Array of specific issues found, each with:
+  - file: Path to the file where the issue was found
+  - line: Line number (use null if not applicable to a specific line)
+  - severity: Severity level (info/low/medium/high/critical/security)
+  - title: Clear, specific title of the issue
+  - detail: Detailed explanation of the issue
+  - suggestion: Actionable suggestion to fix the issue (use null if no suggestion)
+  - tags: Array of tags for categorizing the issue (use null if no tags)
 
-If everything looks good, return: {"summary": "Code looks good! No obvious issues found.", "overall_risk": "low", "issues": []}`
+If everything looks good, provide a positive summary with "low" overall_risk and an empty issues array.`
 
     const user = [
       {
@@ -338,32 +394,65 @@ ${diff}
     ]
 
     console.log('🤖 AI Model being used:', AI_MODEL);
-    const ai = await openai.chat.completions.create({
-      model: AI_MODEL,
-      messages: [{ role: 'system', content: system }, ...user],
-      max_completion_tokens: 4000,
-    })
+    let ai
+    try {
+      ai = await openai.chat.completions.create({
+        model: AI_MODEL,
+        messages: [{ role: 'system', content: system }, ...user],
+        response_format: {
+          type: "json_schema",
+          json_schema: {
+            name: "code_review_response",
+            description: "AI code review analysis with structured output",
+            schema: reviewJsonSchema,
+            strict: true
+          }
+        }
+      })
+    } catch (apiError) {
+      console.error('❌ OpenAI API call failed:', apiError.message)
+      throw new Error(`OpenAI API call failed: ${apiError.message}`)
+    }
 
-    const text = ai.choices?.[0]?.message?.content ?? '{}'
+    // Better logging for debugging
+    if (!ai.choices || ai.choices.length === 0) {
+      throw new Error('AI response missing choices array')
+    }
+    
+    if (!ai.choices[0]?.message?.content) {
+      console.error('❌ Unexpected AI response structure:', JSON.stringify(ai, null, 2))
+      throw new Error('AI response missing message content')
+    }
+    
+    const text = ai.choices[0].message.content
+    console.log('📝 AI Response length:', text.length)
+    console.log('📝 AI Response preview:', text.slice(0, 100) + (text.length > 100 ? '...' : ''))
+    
+    if (!text || text.trim() === '') {
+      throw new Error('AI returned empty response')
+    }
     let parsed
     try {
-      parsed = ReviewShape.parse(JSON.parse(text))
+      // With structured outputs, the response should always be valid JSON conforming to our schema
+      const jsonResponse = JSON.parse(text)
+      parsed = ReviewShape.parse(jsonResponse)
     } catch (error) {
-      // Log the error for debugging
-      console.error('Failed to parse AI response:', error.message)
+      // This should rarely happen with structured outputs, but keeping as safety net
+      console.error('Unexpected error parsing structured AI response:', error.message)
+      console.error('Raw response:', text)
 
       // Fallback: mark as inconclusive rather than silently ignoring
       parsed = {
         summary:
-          'AI returned an invalid JSON response. Review marked as inconclusive. Check artifacts for raw output.',
+          'Unexpected error parsing AI response despite structured outputs. Manual review recommended.',
         overall_risk: 'medium',
         issues: [
           {
             file: 'ai-review-script',
             severity: 'medium',
-            title: 'AI response parsing failed',
-            detail: 'The AI model returned non-JSON or malformed JSON. Manual review recommended.',
-            suggestion: 'Check the raw AI response in the artifacts for debugging.',
+            title: 'Structured output parsing failed',
+            detail: 'An unexpected error occurred while parsing the structured AI response. This should not happen with structured outputs enabled.',
+            suggestion: 'Check the raw AI response in the artifacts and report this as a potential bug.',
           },
         ],
       }

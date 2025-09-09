@@ -33,7 +33,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: AI Code Review
-        uses: clearideas/ai-code-review-github-action@v1.0.8
+        uses: clearideas/ai-code-review-github-action@latest
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           openai_api_key: ${{ secrets.OPENAI_API_KEY }}
@@ -50,6 +50,11 @@ jobs:
           name: ai-review-report
           path: ai-review-report-*.json
 ```
+
+### Version Options
+
+- **`@latest`** - Always use the newest version (recommended for most users)
+- **`@v1.0.9`** - Pin to a specific version (recommended for production environments)
 
 ## Inputs
 
