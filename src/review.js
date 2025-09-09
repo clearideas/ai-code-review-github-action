@@ -394,41 +394,39 @@ ${diff}
     ]
 
     console.log('🤖 AI Model being used:', AI_MODEL);
-    let ai
-    try {
-      ai = await openai.chat.completions.create({
-        model: AI_MODEL,
-        messages: [{ role: 'system', content: system }, ...user],
-        response_format: {
-          type: "json_schema",
-          json_schema: {
-            name: "code_review_response",
-            description: "AI code review analysis with structured output",
-            schema: reviewJsonSchema,
-            strict: true
-          }
+    console.log('🔄 Using responses API for structured outputs...')
+    const ai = await openai.responses.create({
+      model: AI_MODEL,
+      instructions: system + '\n\nUser Request:\n' + user[0].content,
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "code_review_response",
+          description: "AI code review analysis with structured output",
+          schema: reviewJsonSchema,
+          strict: true
         }
-      })
-    } catch (apiError) {
-      console.error('❌ OpenAI API call failed:', apiError.message)
-      throw new Error(`OpenAI API call failed: ${apiError.message}`)
-    }
+      }
+    })
+    console.log('✅ Responses API call succeeded')
 
-    // Better logging for debugging
-    if (!ai.choices || ai.choices.length === 0) {
-      throw new Error('AI response missing choices array')
+    // Detailed logging for debugging
+    console.log('📊 Full AI response object:', JSON.stringify(ai, null, 2))
+    
+    // Extract content from responses API format
+    if (!ai.content) {
+      console.error('❌ AI response missing content')
+      console.error('❌ Full response:', JSON.stringify(ai, null, 2))
+      throw new Error('AI response missing content')
     }
     
-    if (!ai.choices[0]?.message?.content) {
-      console.error('❌ Unexpected AI response structure:', JSON.stringify(ai, null, 2))
-      throw new Error('AI response missing message content')
-    }
-    
-    const text = ai.choices[0].message.content
+    const text = ai.content
     console.log('📝 AI Response length:', text.length)
-    console.log('📝 AI Response preview:', text.slice(0, 100) + (text.length > 100 ? '...' : ''))
+    console.log('📝 AI Response content:', text)
     
     if (!text || text.trim() === '') {
+      console.error('❌ AI returned empty response')
+      console.error('❌ Full API response:', JSON.stringify(ai, null, 2))
       throw new Error('AI returned empty response')
     }
     let parsed
