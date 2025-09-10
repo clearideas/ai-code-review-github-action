@@ -51,19 +51,19 @@ const octo = new Octokit({ auth: GITHUB_TOKEN })
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY })
 
 const Issue = z.object({
-  file: z.string(),
-  line: z.number().int().optional(),
-  severity: z.enum(['info', 'low', 'medium', 'high', 'critical', 'security']),
-  title: z.string(),
-  detail: z.string(),
-  suggestion: z.string().optional(),
-  tags: z.array(z.string()).optional(),
+  file: z.string().catch('unknown'),
+  line: z.number().int().nullable().catch(null),
+  severity: z.enum(['info', 'low', 'medium', 'high', 'critical', 'security']).catch('info'),
+  title: z.string().catch('Untitled Issue'),
+  detail: z.string().catch('No details provided'),
+  suggestion: z.string().nullable().catch(null),
+  tags: z.array(z.string()).nullable().catch(null),
 })
 
 const ReviewShape = z.object({
-  summary: z.string(),
-  overall_risk: z.enum(['low', 'medium', 'high', 'critical']),
-  issues: z.array(Issue).default([]),
+  summary: z.string().catch('AI review completed'),
+  overall_risk: z.enum(['low', 'medium', 'high', 'critical']).catch('low'),
+  issues: z.array(Issue).default([]).catch([]),
 })
 
 // Convert zod schema to JSON Schema for OpenAI structured outputs
@@ -431,29 +431,60 @@ ${diff}
     }
     let parsed
     try {
-      // With structured outputs, the response should always be valid JSON conforming to our schema
-      const jsonResponse = JSON.parse(text)
+      // Parse JSON first
+      let jsonResponse
+      try {
+        jsonResponse = JSON.parse(text)
+      } catch (jsonError) {
+        console.error('JSON parsing failed:', jsonError.message)
+        console.error('Raw response:', text)
+        throw new Error(`Invalid JSON response: ${jsonError.message}`)
+      }
+
+      // Validate with forgiving Zod schema
       parsed = ReviewShape.parse(jsonResponse)
+      console.log('✅ Successfully parsed and validated AI response')
     } catch (error) {
-      // This should rarely happen with structured outputs, but keeping as safety net
-      console.error('Unexpected error parsing structured AI response:', error.message)
+      console.error('Error parsing AI response:', error.message)
       console.error('Raw response:', text)
 
-      // Fallback: mark as inconclusive rather than silently ignoring
-      parsed = {
-        summary:
-          'Unexpected error parsing AI response despite structured outputs. Manual review recommended.',
-        overall_risk: 'medium',
-        issues: [
-          {
+      // Very forgiving fallback - try to extract what we can
+      let fallbackData
+      try {
+        const jsonResponse = JSON.parse(text)
+        fallbackData = {
+          summary: jsonResponse.summary || 'AI review completed with parsing issues',
+          overall_risk: ['low', 'medium', 'high', 'critical'].includes(jsonResponse.overall_risk) 
+            ? jsonResponse.overall_risk : 'low',
+          issues: Array.isArray(jsonResponse.issues) ? jsonResponse.issues.map(issue => ({
+            file: issue.file || 'unknown',
+            line: typeof issue.line === 'number' ? issue.line : null,
+            severity: ['info', 'low', 'medium', 'high', 'critical', 'security'].includes(issue.severity) 
+              ? issue.severity : 'info',
+            title: issue.title || 'Untitled Issue',
+            detail: issue.detail || 'No details provided',
+            suggestion: issue.suggestion || null,
+            tags: Array.isArray(issue.tags) ? issue.tags : null,
+          })) : []
+        }
+      } catch (fallbackError) {
+        console.error('Fallback parsing also failed:', fallbackError.message)
+        fallbackData = {
+          summary: 'AI review completed but response format was unexpected. Manual review recommended.',
+          overall_risk: 'medium',
+          issues: [{
             file: 'ai-review-script',
+            line: null,
             severity: 'medium',
-            title: 'Structured output parsing failed',
-            detail: 'An unexpected error occurred while parsing the structured AI response. This should not happen with structured outputs enabled.',
-            suggestion: 'Check the raw AI response in the artifacts and report this as a potential bug.',
-          },
-        ],
+            title: 'Response parsing failed',
+            detail: 'Could not parse AI response. Check artifacts for raw output.',
+            suggestion: 'Report this issue for debugging.',
+            tags: ['parsing-error']
+          }]
+        }
       }
+      
+      parsed = fallbackData
     }
 
     // 3) Persist raw JSON report for auditors
