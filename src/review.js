@@ -410,17 +410,30 @@ ${diff}
     })
     console.log('✅ Responses API call succeeded')
 
-    // Detailed logging for debugging
-    console.log('📊 Full AI response object:', JSON.stringify(ai, null, 2))
-    
-    // Extract content from responses API format
-    if (!ai.content) {
-      console.error('❌ AI response missing content')
-      console.error('❌ Full response:', JSON.stringify(ai, null, 2))
-      throw new Error('AI response missing content')
+    // Detailed logging for debugging response structure issues
+    console.log('📊 Full AI response object keys:', Object.keys(ai))
+    if (ai.response) {
+      console.log('📊 Response object keys:', Object.keys(ai.response))
     }
-    
-    const text = ai.content
+    console.log('📊 Full AI response object:', JSON.stringify(ai, null, 2))
+
+    // Extract content from responses API format - OpenAI responses API returns { response: { content: "..." } }
+    let text
+    if (ai.response && ai.response.content) {
+      text = ai.response.content
+      console.log('✅ Found content in ai.response.content')
+    } else if (ai.content) {
+      // Fallback for older or different response formats
+      text = ai.content
+      console.log('✅ Found content in ai.content (fallback)')
+    } else {
+      console.error('❌ AI response missing content in expected location')
+      console.error('❌ Available response paths:')
+      console.error('  - ai.response.content:', ai.response?.content ? 'EXISTS' : 'MISSING')
+      console.error('  - ai.content:', ai.content ? 'EXISTS' : 'MISSING')
+      console.error('❌ Full response:', JSON.stringify(ai, null, 2))
+      throw new Error('AI response missing content in expected location')
+    }
     console.log('📝 AI Response length:', text.length)
     console.log('📝 AI Response content:', text)
     
@@ -435,9 +448,14 @@ ${diff}
       let jsonResponse
       try {
         jsonResponse = JSON.parse(text)
+        console.log('✅ JSON parsing successful')
       } catch (jsonError) {
-        console.error('JSON parsing failed:', jsonError.message)
-        console.error('Raw response:', text)
+        console.error('❌ JSON parsing failed:', jsonError.message)
+        console.error('❌ Raw response length:', text.length)
+        console.error('❌ Raw response preview:', text.substring(0, 500))
+        if (text.length > 500) {
+          console.error('❌ Raw response end:', text.substring(text.length - 500))
+        }
         throw new Error(`Invalid JSON response: ${jsonError.message}`)
       }
 
@@ -445,21 +463,28 @@ ${diff}
       parsed = ReviewShape.parse(jsonResponse)
       console.log('✅ Successfully parsed and validated AI response')
     } catch (error) {
-      console.error('Error parsing AI response:', error.message)
-      console.error('Raw response:', text)
+      console.error('❌ Error parsing AI response:', error.message)
+      console.error('❌ Raw response length:', text.length)
+      console.error('❌ Raw response preview:', text.substring(0, 500))
+      if (text.length > 500) {
+        console.error('❌ Raw response end:', text.substring(text.length - 500))
+      }
 
       // Very forgiving fallback - try to extract what we can
       let fallbackData
       try {
+        console.log('🔄 Attempting fallback parsing...')
         const jsonResponse = JSON.parse(text)
+        console.log('✅ Fallback JSON parsing successful')
+
         fallbackData = {
           summary: jsonResponse.summary || 'AI review completed with parsing issues',
-          overall_risk: ['low', 'medium', 'high', 'critical'].includes(jsonResponse.overall_risk) 
+          overall_risk: ['low', 'medium', 'high', 'critical'].includes(jsonResponse.overall_risk)
             ? jsonResponse.overall_risk : 'low',
           issues: Array.isArray(jsonResponse.issues) ? jsonResponse.issues.map(issue => ({
             file: issue.file || 'unknown',
             line: typeof issue.line === 'number' ? issue.line : null,
-            severity: ['info', 'low', 'medium', 'high', 'critical', 'security'].includes(issue.severity) 
+            severity: ['info', 'low', 'medium', 'high', 'critical', 'security'].includes(issue.severity)
               ? issue.severity : 'info',
             title: issue.title || 'Untitled Issue',
             detail: issue.detail || 'No details provided',
@@ -467,8 +492,10 @@ ${diff}
             tags: Array.isArray(issue.tags) ? issue.tags : null,
           })) : []
         }
+        console.log('✅ Fallback parsing completed successfully')
       } catch (fallbackError) {
-        console.error('Fallback parsing also failed:', fallbackError.message)
+        console.error('❌ Fallback parsing also failed:', fallbackError.message)
+        console.error('❌ This indicates the AI did not return valid JSON despite structured output mode')
         fallbackData = {
           summary: 'AI review completed but response format was unexpected. Manual review recommended.',
           overall_risk: 'medium',
@@ -476,9 +503,9 @@ ${diff}
             file: 'ai-review-script',
             line: null,
             severity: 'medium',
-            title: 'Response parsing failed',
-            detail: 'Could not parse AI response. Check artifacts for raw output.',
-            suggestion: 'Report this issue for debugging.',
+            title: 'Structured output parsing failed',
+            detail: 'An unexpected error occurred while parsing the structured AI response. This should not happen with structured outputs enabled.',
+            suggestion: 'Check the raw AI response in the artifacts and report this as a potential bug.',
             tags: ['parsing-error']
           }]
         }
