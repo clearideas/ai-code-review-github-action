@@ -21102,18 +21102,18 @@ if (!Number.isInteger(prNumber)) {
 var octo = new import_rest.Octokit({ auth: GITHUB_TOKEN });
 var openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 var Issue = external_exports.object({
-  file: external_exports.string(),
-  line: external_exports.number().int().optional(),
-  severity: external_exports.enum(["info", "low", "medium", "high", "critical", "security"]),
-  title: external_exports.string(),
-  detail: external_exports.string(),
-  suggestion: external_exports.string().optional(),
-  tags: external_exports.array(external_exports.string()).optional()
+  file: external_exports.string().catch("unknown"),
+  line: external_exports.number().int().nullable().catch(null),
+  severity: external_exports.enum(["info", "low", "medium", "high", "critical", "security"]).catch("info"),
+  title: external_exports.string().catch("Untitled Issue"),
+  detail: external_exports.string().catch("No details provided"),
+  suggestion: external_exports.string().nullable().catch(null),
+  tags: external_exports.array(external_exports.string()).nullable().catch(null)
 });
 var ReviewShape = external_exports.object({
-  summary: external_exports.string(),
-  overall_risk: external_exports.enum(["low", "medium", "high", "critical"]),
-  issues: external_exports.array(Issue).default([])
+  summary: external_exports.string().catch("AI review completed"),
+  overall_risk: external_exports.enum(["low", "medium", "high", "critical"]).catch("low"),
+  issues: external_exports.array(Issue).default([]).catch([])
 });
 var reviewJsonSchema = {
   type: "object",
@@ -21406,10 +21406,10 @@ ${diff}
       }
     ];
     console.log("\u{1F916} AI Model being used:", AI_MODEL);
-    const ai = await openai.chat.completions.create({
+    console.log("\u{1F504} Using responses API for structured outputs...");
+    const ai = await openai.responses.create({
       model: AI_MODEL,
-      messages: [{ role: "system", content: system }, ...user],
-      max_completion_tokens: 4e3,
+      instructions: system + "\n\nUser Request:\n" + user[0].content,
       response_format: {
         type: "json_schema",
         json_schema: {
@@ -21420,27 +21420,95 @@ ${diff}
         }
       }
     });
-    const text = ai.choices?.[0]?.message?.content ?? "{}";
+    console.log("\u2705 Responses API call succeeded");
+    console.log("\u{1F4CA} Full AI response object keys:", Object.keys(ai));
+    if (ai.response) {
+      console.log("\u{1F4CA} Response object keys:", Object.keys(ai.response));
+    }
+    console.log("\u{1F4CA} Full AI response object:", JSON.stringify(ai, null, 2));
+    let text;
+    if (ai.response && ai.response.content) {
+      text = ai.response.content;
+      console.log("\u2705 Found content in ai.response.content");
+    } else if (ai.content) {
+      text = ai.content;
+      console.log("\u2705 Found content in ai.content (fallback)");
+    } else {
+      console.error("\u274C AI response missing content in expected location");
+      console.error("\u274C Available response paths:");
+      console.error("  - ai.response.content:", ai.response?.content ? "EXISTS" : "MISSING");
+      console.error("  - ai.content:", ai.content ? "EXISTS" : "MISSING");
+      console.error("\u274C Full response:", JSON.stringify(ai, null, 2));
+      throw new Error("AI response missing content in expected location");
+    }
+    console.log("\u{1F4DD} AI Response length:", text.length);
+    console.log("\u{1F4DD} AI Response content:", text);
+    if (!text || text.trim() === "") {
+      console.error("\u274C AI returned empty response");
+      console.error("\u274C Full API response:", JSON.stringify(ai, null, 2));
+      throw new Error("AI returned empty response");
+    }
     let parsed;
     try {
-      const jsonResponse = JSON.parse(text);
+      let jsonResponse;
+      try {
+        jsonResponse = JSON.parse(text);
+        console.log("\u2705 JSON parsing successful");
+      } catch (jsonError) {
+        console.error("\u274C JSON parsing failed:", jsonError.message);
+        console.error("\u274C Raw response length:", text.length);
+        console.error("\u274C Raw response preview:", text.substring(0, 500));
+        if (text.length > 500) {
+          console.error("\u274C Raw response end:", text.substring(text.length - 500));
+        }
+        throw new Error(`Invalid JSON response: ${jsonError.message}`);
+      }
       parsed = ReviewShape.parse(jsonResponse);
+      console.log("\u2705 Successfully parsed and validated AI response");
     } catch (error) {
-      console.error("Unexpected error parsing structured AI response:", error.message);
-      console.error("Raw response:", text);
-      parsed = {
-        summary: "Unexpected error parsing AI response despite structured outputs. Manual review recommended.",
-        overall_risk: "medium",
-        issues: [
-          {
+      console.error("\u274C Error parsing AI response:", error.message);
+      console.error("\u274C Raw response length:", text.length);
+      console.error("\u274C Raw response preview:", text.substring(0, 500));
+      if (text.length > 500) {
+        console.error("\u274C Raw response end:", text.substring(text.length - 500));
+      }
+      let fallbackData;
+      try {
+        console.log("\u{1F504} Attempting fallback parsing...");
+        const jsonResponse = JSON.parse(text);
+        console.log("\u2705 Fallback JSON parsing successful");
+        fallbackData = {
+          summary: jsonResponse.summary || "AI review completed with parsing issues",
+          overall_risk: ["low", "medium", "high", "critical"].includes(jsonResponse.overall_risk) ? jsonResponse.overall_risk : "low",
+          issues: Array.isArray(jsonResponse.issues) ? jsonResponse.issues.map((issue) => ({
+            file: issue.file || "unknown",
+            line: typeof issue.line === "number" ? issue.line : null,
+            severity: ["info", "low", "medium", "high", "critical", "security"].includes(issue.severity) ? issue.severity : "info",
+            title: issue.title || "Untitled Issue",
+            detail: issue.detail || "No details provided",
+            suggestion: issue.suggestion || null,
+            tags: Array.isArray(issue.tags) ? issue.tags : null
+          })) : []
+        };
+        console.log("\u2705 Fallback parsing completed successfully");
+      } catch (fallbackError) {
+        console.error("\u274C Fallback parsing also failed:", fallbackError.message);
+        console.error("\u274C This indicates the AI did not return valid JSON despite structured output mode");
+        fallbackData = {
+          summary: "AI review completed but response format was unexpected. Manual review recommended.",
+          overall_risk: "medium",
+          issues: [{
             file: "ai-review-script",
+            line: null,
             severity: "medium",
             title: "Structured output parsing failed",
             detail: "An unexpected error occurred while parsing the structured AI response. This should not happen with structured outputs enabled.",
-            suggestion: "Check the raw AI response in the artifacts and report this as a potential bug."
-          }
-        ]
-      };
+            suggestion: "Check the raw AI response in the artifacts and report this as a potential bug.",
+            tags: ["parsing-error"]
+          }]
+        };
+      }
+      parsed = fallbackData;
     }
     const workspaceDir = process.env.GITHUB_WORKSPACE || process.cwd();
     const reportFileName = `ai-review-report-${Date.now()}.json`;
