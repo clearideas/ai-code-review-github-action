@@ -66,8 +66,7 @@ const ReviewShape = z.object({
   issues: z.array(Issue).default([]).catch([]),
 })
 
-// Convert zod schema to JSON Schema for OpenAI structured outputs
-// Note: With strict mode, all properties must be required, so we use null for optional fields
+// Simplified JSON Schema for OpenAI structured outputs - more flexible to handle code content issues
 const reviewJsonSchema = {
   type: "object",
   properties: {
@@ -78,7 +77,8 @@ const reviewJsonSchema = {
     overall_risk: {
       type: "string",
       enum: ["low", "medium", "high", "critical"],
-      description: "Overall risk assessment of the changes"
+      description: "Overall risk assessment of the changes",
+      default: "low"
     },
     issues: {
       type: "array",
@@ -88,42 +88,51 @@ const reviewJsonSchema = {
         properties: {
           file: {
             type: "string",
-            description: "Path to the file where the issue was found"
+            description: "Path to the file where the issue was found",
+            default: "unknown"
           },
           line: {
             type: ["integer", "null"],
-            description: "Line number where the issue occurs (null if not applicable)"
+            description: "Line number where the issue occurs (null if not applicable)",
+            default: null
           },
           severity: {
             type: "string",
             enum: ["info", "low", "medium", "high", "critical", "security"],
-            description: "Severity level of the issue"
+            description: "Severity level of the issue",
+            default: "info"
           },
           title: {
             type: "string",
-            description: "Clear, specific title of the issue"
+            description: "Clear, specific title of the issue",
+            default: "Untitled Issue"
           },
           detail: {
             type: "string",
-            description: "Detailed explanation of the issue"
+            description: "Detailed explanation of the issue",
+            default: "No details provided"
           },
           suggestion: {
             type: ["string", "null"],
-            description: "Actionable suggestion to fix the issue (null if not applicable)"
+            description: "Actionable suggestion to fix the issue (null if not applicable)",
+            default: null
           },
           tags: {
             type: ["array", "null"],
             items: { type: "string" },
-            description: "Optional tags for categorizing the issue (null if not applicable)"
+            description: "Optional tags for categorizing the issue (null if not applicable)",
+            default: null
           }
         },
-        required: ["file", "line", "severity", "title", "detail", "suggestion", "tags"],
-        additionalProperties: false
-      }
+        // Removed strict requirements to allow flexibility with code content
+        additionalProperties: true
+      },
+      default: []
     }
   },
   required: ["summary", "overall_risk", "issues"],
-  additionalProperties: false
+  // Allow additional properties in case AI includes extra fields
+  additionalProperties: true
 }
 
 let failOn
@@ -319,6 +328,137 @@ function truncateComment(text, maxLen = 60000) {
   return text.slice(0, maxLen) + '\n\n[Comment truncated for size. See artifact for full report.]'
 }
 
+// Robust parsing function that tries multiple approaches when structured output fails
+async function attemptRobustParsing(text) {
+  console.log('🔄 Starting robust parsing attempts...')
+
+  // Attempt 1: Try to extract JSON from the response (in case AI added extra text)
+  const jsonMatch = text.match(/\{[\s\S]*\}/)
+  if (jsonMatch) {
+    try {
+      console.log('🔍 Found JSON-like content, attempting to parse...')
+      const jsonResponse = JSON.parse(jsonMatch[0])
+      console.log('✅ JSON extraction and parsing successful')
+
+      return {
+        summary: jsonResponse.summary || 'AI review completed with parsing issues',
+        overall_risk: ['low', 'medium', 'high', 'critical'].includes(jsonResponse.overall_risk)
+          ? jsonResponse.overall_risk : 'low',
+        issues: Array.isArray(jsonResponse.issues) ? jsonResponse.issues.map(issue => ({
+          file: issue.file || 'unknown',
+          line: typeof issue.line === 'number' ? issue.line : null,
+          severity: ['info', 'low', 'medium', 'high', 'critical', 'security'].includes(issue.severity)
+            ? issue.severity : 'info',
+          title: issue.title || 'Untitled Issue',
+          detail: issue.detail || 'No details provided',
+          suggestion: issue.suggestion || null,
+          tags: Array.isArray(issue.tags) ? issue.tags : null,
+        })) : []
+      }
+    } catch (error) {
+      console.log('❌ JSON extraction failed, trying next approach...')
+    }
+  }
+
+  // Attempt 2: Pattern-based extraction for critical issues
+  console.log('🔍 Attempting pattern-based extraction...')
+  const patternData = extractIssuesFromText(text)
+
+  if (patternData.issues.length > 0 || text.toLowerCase().includes('looks good') || text.toLowerCase().includes('no issues')) {
+    console.log('✅ Pattern-based extraction found content')
+    return patternData
+  }
+
+  // Attempt 3: If all else fails, create a generic response
+  console.log('❌ All parsing attempts failed, using generic response')
+  return {
+    summary: 'AI review completed but response format was unexpected. Manual review recommended.',
+    overall_risk: 'medium',
+    issues: [{
+      file: 'ai-review-script',
+      line: null,
+      severity: 'medium',
+      title: 'Response parsing failed',
+      detail: 'Could not parse AI response using multiple methods. Check artifacts for raw output.',
+      suggestion: 'Report this issue for debugging.',
+      tags: ['parsing-error']
+    }]
+  }
+}
+
+// Extract issues using pattern matching when JSON parsing fails
+function extractIssuesFromText(text) {
+  const issues = []
+  let overall_risk = 'low'
+
+  // Look for severity indicators in the text
+  const highMatches = text.match(/\[?\b(HIGH|HIGH RISK|CRITICAL|CRITICAL RISK|SECURITY|SECURITY RISK)\b\]?/gi) || []
+  const mediumMatches = text.match(/\[?\b(MEDIUM|MEDIUM RISK)\b\]?/gi) || []
+  const lowMatches = text.match(/\[?\b(LOW|LOW RISK|INFO)\b\]?/gi) || []
+
+  // Determine overall risk based on found indicators
+  if (highMatches.length > 0) {
+    overall_risk = 'high'
+  } else if (mediumMatches.length > 0) {
+    overall_risk = 'medium'
+  }
+
+  // Extract specific issues using regex patterns
+  const issuePatterns = [
+    // Pattern: [SEVERITY] Issue description (file:line)
+    /\[?(HIGH|CRITICAL|SECURITY)\]?\s*([^-\n]+?)(?:\s*[-–]\s*([^:\n]+?):?(\d+)?)?/gi,
+    // Pattern: Issue in file:line - severity
+    /([^-\n]+?)\s*[-–]\s*([^:\n]+?):?(\d+)?\s*[-–]\s*\[?(HIGH|CRITICAL|SECURITY)\]?/gi,
+    // Pattern: File: issue description [SEVERITY]
+    /([^:\n]+?):(.+?)\[?(HIGH|CRITICAL|SECURITY)\]?/gi,
+  ]
+
+  for (const pattern of issuePatterns) {
+    let match
+    while ((match = pattern.exec(text)) !== null) {
+      const severity = match.find(m => ['HIGH', 'CRITICAL', 'SECURITY', 'MEDIUM', 'LOW'].includes(m?.toUpperCase()))?.toLowerCase() || 'medium'
+      const title = match.find(m => m && m.length > 3 && !m.match(/^\d+$/)) || 'Issue found'
+      const file = match.find(m => m && m.includes('/')) || 'unknown'
+      const line = match.find(m => m && /^\d+$/.test(m))
+
+      // Only add if we haven't already captured this issue
+      const issueKey = `${file}:${line || 'no-line'}:${severity}:${title}`
+      if (!issues.some(issue => `${issue.file}:${issue.line || 'no-line'}:${issue.severity}:${issue.title}` === issueKey)) {
+        issues.push({
+          file: file.replace(/^\s*[-–]\s*/, ''),
+          line: line ? parseInt(line, 10) : null,
+          severity: severity,
+          title: title.replace(/^\s*[-–]\s*/, '').trim(),
+          detail: `Issue detected in code review requiring attention.`,
+          suggestion: null,
+          tags: ['pattern-extracted']
+        })
+      }
+    }
+  }
+
+  // If no specific issues found but text suggests problems, create a generic issue
+  if (issues.length === 0 && (highMatches.length > 0 || mediumMatches.length > 0)) {
+    issues.push({
+      file: 'unknown',
+      line: null,
+      severity: highMatches.length > 0 ? 'high' : 'medium',
+      title: 'Issues detected in code review',
+      detail: 'The AI review identified potential issues but specific details could not be extracted.',
+      suggestion: 'Please review the raw AI response in artifacts for detailed findings.',
+      tags: ['pattern-extracted']
+    })
+  }
+
+  return {
+    summary: issues.length > 0
+      ? `AI review identified ${issues.length} potential issue${issues.length > 1 ? 's' : ''} requiring attention.`
+      : 'AI review completed - no critical issues detected in parseable format.',
+    overall_risk: overall_risk,
+    issues: issues
+  }
+}
+
 ;(async () => {
   try {
     // 1) Load PR & changed files
@@ -365,19 +505,26 @@ WHAT TO LOOK FOR (only flag if you're confident):
 
 TONE: Assume the developer is competent. If you're not sure about an issue, don't report it.
 
-RESPONSE FORMAT: Your response will be automatically structured according to the defined schema. Provide:
-- summary: Brief, encouraging overview of the code review
-- overall_risk: Assessment of the overall risk level (low/medium/high/critical)
-- issues: Array of specific issues found, each with:
-  - file: Path to the file where the issue was found
-  - line: Line number (use null if not applicable to a specific line)
-  - severity: Severity level (info/low/medium/high/critical/security)
-  - title: Clear, specific title of the issue
-  - detail: Detailed explanation of the issue
-  - suggestion: Actionable suggestion to fix the issue (use null if no suggestion)
-  - tags: Array of tags for categorizing the issue (use null if no tags)
+RESPONSE FORMAT: Provide a JSON response matching this structure:
+{
+  "summary": "Brief, encouraging overview of the code review",
+  "overall_risk": "low|medium|high|critical",
+  "issues": [
+    {
+      "file": "path/to/file",
+      "line": 123,
+      "severity": "info|low|medium|high|critical|security",
+      "title": "Clear, specific title",
+      "detail": "Detailed explanation",
+      "suggestion": "Actionable suggestion (or null)",
+      "tags": ["tag1", "tag2"] (or null)
+    }
+  ]
+}
 
-If everything looks good, provide a positive summary with "low" overall_risk and an empty issues array.`
+If everything looks good, provide a positive summary with "low" overall_risk and an empty issues array.
+
+IMPORTANT: Ensure your response is valid JSON even if the code contains special characters.`
 
     const user = [
       {
@@ -404,7 +551,8 @@ ${diff}
           name: "code_review_response",
           description: "AI code review analysis with structured output",
           schema: reviewJsonSchema,
-          strict: true
+          // Removed strict mode to be more flexible with code content
+          strict: false
         }
       }
     })
@@ -470,46 +618,8 @@ ${diff}
         console.error('❌ Raw response end:', text.substring(text.length - 500))
       }
 
-      // Very forgiving fallback - try to extract what we can
-      let fallbackData
-      try {
-        console.log('🔄 Attempting fallback parsing...')
-        const jsonResponse = JSON.parse(text)
-        console.log('✅ Fallback JSON parsing successful')
-
-        fallbackData = {
-          summary: jsonResponse.summary || 'AI review completed with parsing issues',
-          overall_risk: ['low', 'medium', 'high', 'critical'].includes(jsonResponse.overall_risk)
-            ? jsonResponse.overall_risk : 'low',
-          issues: Array.isArray(jsonResponse.issues) ? jsonResponse.issues.map(issue => ({
-            file: issue.file || 'unknown',
-            line: typeof issue.line === 'number' ? issue.line : null,
-            severity: ['info', 'low', 'medium', 'high', 'critical', 'security'].includes(issue.severity)
-              ? issue.severity : 'info',
-            title: issue.title || 'Untitled Issue',
-            detail: issue.detail || 'No details provided',
-            suggestion: issue.suggestion || null,
-            tags: Array.isArray(issue.tags) ? issue.tags : null,
-          })) : []
-        }
-        console.log('✅ Fallback parsing completed successfully')
-      } catch (fallbackError) {
-        console.error('❌ Fallback parsing also failed:', fallbackError.message)
-        console.error('❌ This indicates the AI did not return valid JSON despite structured output mode')
-        fallbackData = {
-          summary: 'AI review completed but response format was unexpected. Manual review recommended.',
-          overall_risk: 'medium',
-          issues: [{
-            file: 'ai-review-script',
-            line: null,
-            severity: 'medium',
-            title: 'Structured output parsing failed',
-            detail: 'An unexpected error occurred while parsing the structured AI response. This should not happen with structured outputs enabled.',
-            suggestion: 'Check the raw AI response in the artifacts and report this as a potential bug.',
-            tags: ['parsing-error']
-          }]
-        }
-      }
+      // Try multiple fallback approaches for robust parsing
+      let fallbackData = await attemptRobustParsing(text)
       
       parsed = fallbackData
     }
