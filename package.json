@@ -21,6 +21,7 @@
     ],
     "license": "MIT",
     "devDependencies": {
-        "esbuild": "^0.25.9"
+        "esbuild": "^0.25.9",
+        "js-yaml": "^4.1.0"
     }
 }
