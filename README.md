@@ -55,7 +55,7 @@ jobs:
 ### Version Options
 
 - **`@latest`** - Always use the newest version (recommended for most users)
-- **`@v1.1.3`** - Pin to a specific version (recommended for production environments)
+- **`@v1.1.4`** - Pin to a specific version (recommended for production environments)
 
 ## Inputs
 
@@ -84,6 +84,13 @@ jobs:
 - All data handling follows security best practices
 
 ## Changelog
+
+### v1.1.4 (2025-10-16)
+
+**Critical Fix:**
+- 🔧 **Fixed content extraction**: Corrected path to use `ai.output_text` instead of `ai.response?.content`
+- ✅ **Resolves empty response error**: AI responses now properly extracted and parsed
+- 🎯 **Verified working**: Successfully tested with real workflow execution
 
 ### v1.1.3 (2025-10-16)
 
