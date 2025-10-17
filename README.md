@@ -55,7 +55,7 @@ jobs:
 ### Version Options
 
 - **`@latest`** - Always use the newest version (recommended for most users)
-- **`@v1.1.1`** - Pin to a specific version (recommended for production environments)
+- **`@v1.1.2`** - Pin to a specific version (recommended for production environments)
 
 ## Inputs
 
@@ -84,6 +84,13 @@ jobs:
 - All data handling follows security best practices
 
 ## Changelog
+
+### v1.1.2 (2025-01-17)
+
+**API Fix:**
+- 🔧 **Fixed OpenAI Responses API parameter**: Changed from 'instructions' to 'input'
+- Resolves "Missing required parameter: input" runtime error
+- Ensures compatibility with OpenAI Responses API specification
 
 ### v1.1.1 (2025-01-17)
 
