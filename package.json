@@ -1,6 +1,6 @@
 {
     "name": "ai-code-review-github-action",
-    "version": "1.0.14",
+    "version": "1.1.0",
     "description": "AI-powered code review GitHub Action",
     "main": "src/review.js",
     "scripts": {
@@ -9,8 +9,7 @@
     },
     "dependencies": {
         "@octokit/rest": "^20.0.2",
-        "openai": "^4.57.0",
-        "zod": "^3.22.4"
+        "openai": "^4.57.0"
     },
     "keywords": [
         "github-action",
