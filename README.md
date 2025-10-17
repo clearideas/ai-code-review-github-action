@@ -55,7 +55,7 @@ jobs:
 ### Version Options
 
 - **`@latest`** - Always use the newest version (recommended for most users)
-- **`@v1.1.0`** - Pin to a specific version (recommended for production environments)
+- **`@v1.1.1`** - Pin to a specific version (recommended for production environments)
 
 ## Inputs
 
@@ -84,6 +84,13 @@ jobs:
 - All data handling follows security best practices
 
 ## Changelog
+
+### v1.1.1 (2025-01-17)
+
+**Security Fix:**
+- 🔒 **Fixed ReDoS vulnerability**: Applied CodeQL-recommended fix to regex pattern
+- Prevents potential catastrophic backtracking in file path parsing
+- No functional changes - all existing behavior preserved
 
 ### v1.1.0 (2025-01-17)
 
