@@ -17378,7 +17378,7 @@ ${diff}
     console.log("\u{1F504} Using responses API for plain text output...");
     const ai = await openai.responses.create({
       model: AI_MODEL,
-      instructions: system + "\n\nUser Request:\n" + user[0].content
+      input: system + "\n\nUser Request:\n" + user[0].content
       // No response_format specified = plain text output
     });
     console.log("\u2705 Responses API call succeeded");

@@ -431,7 +431,7 @@ ${diff}
     console.log('🔄 Using responses API for plain text output...')
     const ai = await openai.responses.create({
       model: AI_MODEL,
-      instructions: system + '\n\nUser Request:\n' + user[0].content,
+      input: system + '\n\nUser Request:\n' + user[0].content,
       // No response_format specified = plain text output
     })
     console.log('✅ Responses API call succeeded')
