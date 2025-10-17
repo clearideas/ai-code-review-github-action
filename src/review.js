@@ -446,7 +446,7 @@ ${diff}
     console.log('🔍 Full AI response structure:', JSON.stringify(ai, null, 2))
 
     // Extract content from responses API format
-    const text = ai.response?.content || ai.content
+    const text = ai.output_text || ai.response?.content || ai.content
     
     if (!text || text.trim() === '') {
       console.error('❌ AI returned empty response')

@@ -17389,7 +17389,7 @@ ${diff}
     });
     console.log("\u2705 Responses API call succeeded");
     console.log("\u{1F50D} Full AI response structure:", JSON.stringify(ai, null, 2));
-    const text = ai.response?.content || ai.content;
+    const text = ai.output_text || ai.response?.content || ai.content;
     if (!text || text.trim() === "") {
       console.error("\u274C AI returned empty response");
       console.error("\u274C Response structure:", JSON.stringify(ai, null, 2));

@@ -85,28 +85,28 @@ jobs:
 
 ## Changelog
 
-### v1.1.3 (2025-01-17)
+### v1.1.3 (2025-10-16)
 
 **File Support & Debugging:**
 - 🌐 **Added HTML/CSS support**: Now includes .html, .htm, .css, .scss, .sass, .less files
 - 🔍 **Enhanced debugging**: Added detailed logging for empty AI responses
 - 🐛 **Improved troubleshooting**: Better error messages with full response structure
 
-### v1.1.2 (2025-01-17)
+### v1.1.2 (2025-10-16)
 
 **API Fix:**
 - 🔧 **Fixed OpenAI Responses API parameter**: Changed from 'instructions' to 'input'
 - Resolves "Missing required parameter: input" runtime error
 - Ensures compatibility with OpenAI Responses API specification
 
-### v1.1.1 (2025-01-17)
+### v1.1.1 (2025-10-16)
 
 **Security Fix:**
 - 🔒 **Fixed ReDoS vulnerability**: Applied CodeQL-recommended fix to regex pattern
 - Prevents potential catastrophic backtracking in file path parsing
 - No functional changes - all existing behavior preserved
 
-### v1.1.0 (2025-01-17)
+### v1.1.0 (2025-10-16)
 
 **Major Improvements:**
 - 🎯 **Eliminated JSON parsing errors**: Switched from JSON structured output to plain-text parsing with severity markers
