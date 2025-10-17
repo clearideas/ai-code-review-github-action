@@ -17120,6 +17120,12 @@ var ALLOWED_FILE_EXTENSIONS = [
   /\.sh$/i,
   /\.sql$/i,
   /\.md$/i,
+  /\.html$/i,
+  /\.htm$/i,
+  /\.css$/i,
+  /\.scss$/i,
+  /\.sass$/i,
+  /\.less$/i,
   // Common config files
   /\.json$/i,
   /\.yml$/i,
@@ -17382,9 +17388,11 @@ ${diff}
       // No response_format specified = plain text output
     });
     console.log("\u2705 Responses API call succeeded");
+    console.log("\u{1F50D} Full AI response structure:", JSON.stringify(ai, null, 2));
     const text = ai.response?.content || ai.content;
     if (!text || text.trim() === "") {
       console.error("\u274C AI returned empty response");
+      console.error("\u274C Response structure:", JSON.stringify(ai, null, 2));
       throw new Error("AI returned empty response");
     }
     console.log("\u{1F4DD} AI Response length:", text.length);

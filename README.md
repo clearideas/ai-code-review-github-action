@@ -55,7 +55,7 @@ jobs:
 ### Version Options
 
 - **`@latest`** - Always use the newest version (recommended for most users)
-- **`@v1.1.2`** - Pin to a specific version (recommended for production environments)
+- **`@v1.1.3`** - Pin to a specific version (recommended for production environments)
 
 ## Inputs
 
@@ -84,6 +84,13 @@ jobs:
 - All data handling follows security best practices
 
 ## Changelog
+
+### v1.1.3 (2025-01-17)
+
+**File Support & Debugging:**
+- 🌐 **Added HTML/CSS support**: Now includes .html, .htm, .css, .scss, .sass, .less files
+- 🔍 **Enhanced debugging**: Added detailed logging for empty AI responses
+- 🐛 **Improved troubleshooting**: Better error messages with full response structure
 
 ### v1.1.2 (2025-01-17)
 

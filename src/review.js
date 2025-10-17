@@ -115,6 +115,12 @@ const ALLOWED_FILE_EXTENSIONS = [
   /\.sh$/i,
   /\.sql$/i,
   /\.md$/i,
+  /\.html$/i,
+  /\.htm$/i,
+  /\.css$/i,
+  /\.scss$/i,
+  /\.sass$/i,
+  /\.less$/i,
   // Common config files
   /\.json$/i,
   /\.yml$/i,
@@ -436,11 +442,15 @@ ${diff}
     })
     console.log('✅ Responses API call succeeded')
 
+    // Debug: Log the full response structure
+    console.log('🔍 Full AI response structure:', JSON.stringify(ai, null, 2))
+
     // Extract content from responses API format
     const text = ai.response?.content || ai.content
     
     if (!text || text.trim() === '') {
       console.error('❌ AI returned empty response')
+      console.error('❌ Response structure:', JSON.stringify(ai, null, 2))
       throw new Error('AI returned empty response')
     }
     
