@@ -17243,7 +17243,7 @@ function extractIssuesFromText(text) {
   if (!summary) {
     summary = "AI review completed";
   }
-  const issuePattern = /\*{0,2}\[(SECURITY|CRITICAL|HIGH|MEDIUM|LOW|INFO)\]\*{0,2}\s*([^\n]+?)(?:\s*-\s*([^\s\n:]+(?:\/[^\s\n:]+)*(?:\.[a-z0-9]{1,6})?)(?::(\d+))?)?(?:\n|$)/gi;
+  const issuePattern = /\*{0,2}\[(SECURITY|CRITICAL|HIGH|MEDIUM|LOW|INFO)\]\*{0,2}\s*([^\n]+?)(?:\s*-\s*((?:[^\s\n:/]+(?:\/[^\s\n:/]+)*)(?:\.[a-z0-9]{1,6})?)(?::(\d+))?)?(?:\n|$)/gi;
   let match;
   while ((match = issuePattern.exec(text)) !== null) {
     const severity = match[1].toLowerCase();
