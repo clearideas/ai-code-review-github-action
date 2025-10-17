@@ -4,11 +4,12 @@ Automated AI-powered code review using OpenAI GPT models for GitHub pull request
 
 ## Features
 
-- 🤖 AI-powered code analysis using OpenAI models
+- 🤖 AI-powered code analysis using OpenAI Responses API
 - 🔒 Secure handling of sensitive files and data
 - 📊 Configurable severity levels and failure conditions
 - 💬 Automatic PR comments with findings
 - 📋 JSON artifacts for audit trails
+- ✨ **NEW in v1.1.0:** Robust plain-text parsing eliminates JSON encoding issues
 
 
 ## Usage
@@ -54,7 +55,7 @@ jobs:
 ### Version Options
 
 - **`@latest`** - Always use the newest version (recommended for most users)
-- **`@v1.0.9`** - Pin to a specific version (recommended for production environments)
+- **`@v1.1.1`** - Pin to a specific version (recommended for production environments)
 
 ## Inputs
 
@@ -81,6 +82,39 @@ jobs:
 - Secrets are redacted before sending to AI
 - Only safe file types are reviewed
 - All data handling follows security best practices
+
+## Changelog
+
+### v1.1.1 (2025-01-17)
+
+**Security Fix:**
+- 🔒 **Fixed ReDoS vulnerability**: Applied CodeQL-recommended fix to regex pattern
+- Prevents potential catastrophic backtracking in file path parsing
+- No functional changes - all existing behavior preserved
+
+### v1.1.0 (2025-01-17)
+
+**Major Improvements:**
+- 🎯 **Eliminated JSON parsing errors**: Switched from JSON structured output to plain-text parsing with severity markers
+- 🚀 **More reliable**: Parser now handles code with quotes, braces, and special characters without breaking
+- 🔧 **Robust parsing**: Tolerates AI formatting variations (spacing, markdown, case sensitivity)
+- 📝 **Better debugging**: Plain text output is human-readable and easier to troubleshoot
+- 🔄 **Using Responses API**: Continues to use OpenAI's modern Responses API for future compatibility
+
+**What Changed:**
+- Removed Zod schema validation and JSON structured output requirements
+- AI now outputs plain text with `[SEVERITY]` markers (e.g., `[HIGH]`, `[CRITICAL]`, `[SECURITY]`)
+- Enhanced text parser extracts structured data from plain text responses
+- Improved artifact reporting includes both raw response and parsed structure
+
+**Migration Notes:**
+- No action required - the action works identically from a user's perspective
+- All existing configurations and inputs remain unchanged
+- Output format in PR comments stays the same
+
+### v1.0.14 and earlier
+
+Previous versions used JSON structured output which occasionally failed when reviewing code containing special characters.
 
 ## License
 
