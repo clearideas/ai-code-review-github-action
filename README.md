@@ -56,7 +56,7 @@ jobs:
 ### Version Options
 
 - **`@latest`** - Always use the newest version (recommended for most users)
-- **`@v1.2.0`** - Pin to a specific version (recommended for production environments)
+- **`@v1.2.1`** - Pin to a specific version (recommended for production environments)
 
 ## Inputs
 
@@ -86,7 +86,12 @@ jobs:
 
 ## Changelog
 
-### v1.2.0 (Current)
+### v1.2.1 (Current)
+
+**Bug Fix:**
+- 🔧 **Fixed release workflow permissions**: Added `contents: write` permission to release workflow to fix GitHub Actions release creation errors
+
+### v1.2.0
 
 **Prompt Refinement:**
 - 🎯 **Reduced false positives**: AI now understands it only sees diffs, not full files - won't flag missing imports or undefined types
