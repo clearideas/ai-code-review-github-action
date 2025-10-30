@@ -1,38 +1,40 @@
 name: Release
 
 on:
-    push:
-        tags:
-            - "v*"
+  push:
+    tags:
+      - "v*"
 
 jobs:
-    release:
-        runs-on: ubuntu-latest
-        steps:
-            - name: Checkout
-              uses: actions/checkout@v4
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-            - name: Setup Node.js
-              uses: actions/setup-node@v4
-              with:
-                  node-version: "20"
-                  cache: "npm"
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
 
-            - name: Install dependencies
-              run: npm ci
+      - name: Install dependencies
+        run: npm ci
 
-            - name: Build action
-              run: npm run build
+      - name: Build action
+        run: npm run build
 
-            - name: Create Release Archive
-              run: |
-                  # Create a tarball for the action
-                  tar -czf ai-code-review-github-action.tar.gz -C . --exclude=.git --exclude=node_modules --exclude=.github *
+      - name: Create Release Archive
+        run: |
+          # Create a tarball for the action
+          tar -czf ai-code-review-github-action.tar.gz -C . --exclude=.git --exclude=node_modules --exclude=.github *
 
-            - name: Create Release
-              uses: softprops/action-gh-release@v2
-              with:
-                  files: ./ai-code-review-github-action.tar.gz
-                  generate_release_notes: true
-                  draft: false
-                  prerelease: false
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ./ai-code-review-github-action.tar.gz
+          generate_release_notes: true
+          draft: false
+          prerelease: false
