@@ -9,6 +9,7 @@ Automated AI-powered code review using OpenAI GPT models for GitHub pull request
 - 📊 Configurable severity levels and failure conditions
 - 💬 Automatic PR comments with findings
 - 📋 JSON artifacts for audit trails
+- ✨ **NEW in v1.2.0:** Refined AI prompt reduces false positives and improves severity classification
 - ✨ **NEW in v1.1.0:** Robust plain-text parsing eliminates JSON encoding issues
 
 
@@ -55,7 +56,7 @@ jobs:
 ### Version Options
 
 - **`@latest`** - Always use the newest version (recommended for most users)
-- **`@v1.1.3`** - Pin to a specific version (recommended for production environments)
+- **`@v1.2.0`** - Pin to a specific version (recommended for production environments)
 
 ## Inputs
 
@@ -85,28 +86,51 @@ jobs:
 
 ## Changelog
 
-### v1.1.3 (2025-01-17)
+### v1.2.0 (Current)
+
+**Prompt Refinement:**
+- 🎯 **Reduced false positives**: AI now understands it only sees diffs, not full files - won't flag missing imports or undefined types
+- 🔧 **Tooling awareness**: Explicitly recognizes that type checkers and linters are already running
+- 📊 **Improved severity classification**: Added detailed severity guidelines with examples to prevent over-escalation
+- ✅ **Higher confidence threshold**: Requires 95%+ confidence before flagging issues
+- 🚫 **Expanded exclusion list**: Explicitly excludes code style, theoretical concerns, and micro-optimizations
+- 💡 **Focused review**: Concentrates on runtime bugs and security vulnerabilities that slip through other tools
+
+**Improvements:**
+- Reduced noise from false positives (missing imports, undefined types, etc.)
+- More accurate severity levels (no longer over-characterizes issues)
+- Better understanding of diff-only context
+- Clearer guidelines on what to flag vs. ignore
+
+### v1.1.4 (2025-10-16)
+
+**Critical Fix:**
+- 🔧 **Fixed content extraction**: Corrected path to use `ai.output_text` instead of `ai.response?.content`
+- ✅ **Resolves empty response error**: AI responses now properly extracted and parsed
+- 🎯 **Verified working**: Successfully tested with real workflow execution
+
+### v1.1.3 (2025-10-16)
 
 **File Support & Debugging:**
 - 🌐 **Added HTML/CSS support**: Now includes .html, .htm, .css, .scss, .sass, .less files
 - 🔍 **Enhanced debugging**: Added detailed logging for empty AI responses
 - 🐛 **Improved troubleshooting**: Better error messages with full response structure
 
-### v1.1.2 (2025-01-17)
+### v1.1.2 (2025-10-16)
 
 **API Fix:**
 - 🔧 **Fixed OpenAI Responses API parameter**: Changed from 'instructions' to 'input'
 - Resolves "Missing required parameter: input" runtime error
 - Ensures compatibility with OpenAI Responses API specification
 
-### v1.1.1 (2025-01-17)
+### v1.1.1 (2025-10-16)
 
 **Security Fix:**
 - 🔒 **Fixed ReDoS vulnerability**: Applied CodeQL-recommended fix to regex pattern
 - Prevents potential catastrophic backtracking in file path parsing
 - No functional changes - all existing behavior preserved
 
-### v1.1.0 (2025-01-17)
+### v1.1.0 (2025-10-16)
 
 **Major Improvements:**
 - 🎯 **Eliminated JSON parsing errors**: Switched from JSON structured output to plain-text parsing with severity markers
