@@ -17316,6 +17316,10 @@ function extractIssuesFromText(text) {
     const system = `You are reviewing a pull request by examining unified diffs. You ONLY see the changed lines, not the full codebase.
 
 CRITICAL CONTEXT:
+- \u26A0\uFE0F IMPORTANT: This code has ALREADY PASSED type checking (TypeScript/Flow/etc.) and linting (ESLint/TSLint/etc.)
+  * All type errors have been resolved - DO NOT flag type-related issues
+  * All linting errors have been resolved - DO NOT flag style, formatting, or linting issues
+  * If something compiles and passes lint, assume it's correct from a static analysis perspective
 - You only see DIFFS (changed lines), not complete files. This means:
   * Imports/types may exist elsewhere - DO NOT flag "missing imports" or "undefined types"
   * Existing code patterns and context are not visible to you
@@ -17343,9 +17347,17 @@ WHAT TO FLAG (only if you're 95%+ confident):
    - Unhandled exceptions that would crash the application
    - Missing validation that could corrupt data
 
-\u274C DO NOT FLAG:
-   - Missing imports, types, or "undefined" references (they exist elsewhere)
-   - Code style, formatting, naming conventions (linter handles this)
+\u274C DO NOT FLAG (these are handled by type checkers and linters):
+   - Type errors, type mismatches, or "any" types (TypeScript already checked this)
+   - Missing type annotations or type definitions (type checker handles this)
+   - Type narrowing issues or type guards (type checker validates this)
+   - Missing imports, types, or "undefined" references (they exist elsewhere and type checker verified)
+   - Unused variables, imports, or dead code (linter catches this)
+   - Code style, formatting, indentation, spacing (linter/formatter handles this)
+   - Naming conventions, variable naming, function naming (linter enforces this)
+   - Missing semicolons, trailing commas, quote style (linter/formatter fixes this)
+   - Missing return type annotations (type checker infers and validates)
+   - Generic type parameters or type constraints (type checker validates)
    - Missing tests or documentation
    - Code complexity or refactoring suggestions
    - Theoretical security concerns ("could potentially")
@@ -17355,6 +17367,7 @@ WHAT TO FLAG (only if you're 95%+ confident):
    - Missing error handling for edge cases (only flag critical gaps)
    - Performance micro-optimizations
    - "Consider adding..." or "might want to..." suggestions
+   - Issues that would be caught by ESLint, TSLint, Prettier, or similar tools
 
 SEVERITY GUIDELINES (use conservatively):
 [SECURITY] - Active vulnerability that allows unauthorized access or data breach
@@ -17374,7 +17387,7 @@ SEVERITY GUIDELINES (use conservatively):
 
 [INFO] - Rarely use - only for genuinely helpful suggestions, not required fixes
 
-TONE: Assume competence. If you're not CERTAIN something is wrong, don't report it. False positives waste time.
+TONE: Assume competence. The code has passed type checking and linting - trust that static analysis tools have done their job. If you're not CERTAIN something is a runtime bug or security vulnerability, don't report it. False positives for lint/type issues waste time and erode trust.
 
 RESPONSE FORMAT: Provide your review in plain text with the following structure:
 
