@@ -1,28 +1,34 @@
 import fs from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { Octokit } from '@octokit/rest'
 import { OpenAI } from 'openai'
+
+const isLocalMode = process.argv.includes('--local')
 
 // Get inputs from GitHub Action environment
 const {
   INPUT_GITHUB_TOKEN: GITHUB_TOKEN,
-  INPUT_OPENAI_API_KEY: OPENAI_API_KEY,
+  INPUT_OPENAI_API_KEY,
+  OPENAI_API_KEY,
   INPUT_AI_MODEL: AI_MODEL = 'gpt-5-mini',
   INPUT_MAX_DIFF_CHARS: MAX_DIFF_CHARS = '180000',
   INPUT_FAIL_ON_SEVERITY: FAIL_ON_SEVERITY = '["high","critical","security"]',
   GITHUB_REPOSITORY,
 } = process.env
 
-if (!GITHUB_TOKEN) throw new Error('Missing github_token input')
-if (!OPENAI_API_KEY) throw new Error('Missing openai_api_key input')
-if (!GITHUB_REPOSITORY || !GITHUB_REPOSITORY.includes('/')) {
+const REVIEW_OPENAI_API_KEY = INPUT_OPENAI_API_KEY || OPENAI_API_KEY
+
+if (!REVIEW_OPENAI_API_KEY) throw new Error('Missing openai_api_key input')
+if (!isLocalMode && !GITHUB_TOKEN) throw new Error('Missing github_token input')
+if (!isLocalMode && (!GITHUB_REPOSITORY || !GITHUB_REPOSITORY.includes('/'))) {
   throw new Error('Missing or invalid GITHUB_REPOSITORY (expected owner/repo)')
 }
 
-const [owner, repo] = GITHUB_REPOSITORY.split('/')
+const [owner, repo] = isLocalMode ? [null, null] : GITHUB_REPOSITORY.split('/')
 
 // Get PR number from GitHub event or environment
 let prNumber
-if (process.env.GITHUB_EVENT_PATH) {
+if (!isLocalMode && process.env.GITHUB_EVENT_PATH) {
   try {
     const event = JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'))
     prNumber = event.pull_request?.number
@@ -32,7 +38,7 @@ if (process.env.GITHUB_EVENT_PATH) {
 }
 
 // Fallback to parsing from GITHUB_REF
-if (!prNumber) {
+if (!isLocalMode && !prNumber) {
   prNumber = parseInt(
     process.env.GITHUB_REF?.match(/refs\/pull\/(\d+)\/merge/)?.[1] ||
       process.env.GITHUB_REF_NAME ||
@@ -42,12 +48,12 @@ if (!prNumber) {
   )
 }
 
-if (!Number.isInteger(prNumber)) {
+if (!isLocalMode && !Number.isInteger(prNumber)) {
   throw new Error('Unable to determine pull request number from GitHub event or environment')
 }
 
-const octo = new Octokit({ auth: GITHUB_TOKEN })
-const openai = new OpenAI({ apiKey: OPENAI_API_KEY })
+const octo = isLocalMode ? null : new Octokit({ auth: GITHUB_TOKEN })
+const openai = new OpenAI({ apiKey: REVIEW_OPENAI_API_KEY })
 
 let failOn
 try {
@@ -70,6 +76,14 @@ try {
 function truncate(str, n) {
   if (str.length <= n) return str
   return str.slice(0, n) + '\n\n[...diff truncated for token safety...]'
+}
+
+function runGit(args, options = {}) {
+  return execFileSync('git', args, {
+    encoding: 'utf8',
+    cwd: options.cwd,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  }).trimEnd()
 }
 
 // Exclude obviously sensitive files and paths from being sent to AI
@@ -160,6 +174,36 @@ function filterSafeFiles(files) {
 
   console.log(`Including ${included.length} files in AI review`)
   return included
+}
+
+function getLocalReviewContext() {
+  const repoRoot = runGit(['rev-parse', '--show-toplevel'])
+  const baseRef = process.env.BASE_REF || 'origin/main'
+  const mergeBase = runGit(['merge-base', baseRef, 'HEAD'], { cwd: repoRoot })
+  const changedFiles = runGit(['diff', '--name-only', `${mergeBase}...HEAD`], { cwd: repoRoot })
+    .split('\n')
+    .map(name => name.trim())
+    .filter(Boolean)
+
+  const safeFiles = filterSafeFiles(changedFiles.map(filename => ({ filename })))
+  const includedFileNames = safeFiles.map(file => file.filename)
+  const rawDiff =
+    includedFileNames.length > 0
+      ? runGit(['diff', '--no-ext-diff', '--unified=3', `${mergeBase}...HEAD`, '--', ...includedFileNames], {
+          cwd: repoRoot,
+        })
+      : ''
+  const branchName = runGit(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: repoRoot })
+
+  return {
+    title: `Local review for ${branchName}`,
+    body: `Local AI review against base ref \`${baseRef}\` from branch \`${branchName}\`.`,
+    diff: rawDiff,
+    workspaceDir: repoRoot,
+    shouldPostComment: false,
+    shouldUpdateCheck: false,
+    prNumber: null,
+  }
 }
 
 // Conservative redaction of obvious secrets only
@@ -345,26 +389,8 @@ function extractIssuesFromText(text) {
   }
 }
 
-;(async () => {
-  try {
-    // 1) Load PR & changed files
-    const { data: pr } = await octo.pulls.get({ owner, repo, pull_number: prNumber })
-    const prBody = pr.body || ''
-    const prTitle = pr.title || ''
-    const files = await octo.paginate(octo.pulls.listFiles, {
-      owner,
-      repo,
-      pull_number: prNumber,
-      per_page: 100,
-    })
-
-    const safeFiles = filterSafeFiles(files)
-    const rawDiff = formatUnifiedPatch(safeFiles)
-    const redactedDiff = sanitizeDiff(rawDiff)
-    const diff = truncate(redactedDiff, parseInt(MAX_DIFF_CHARS, 10))
-
-    // 2) Ask AI to review
-    const system = `You are reviewing a pull request by examining unified diffs. You ONLY see the changed lines, not the full codebase.
+function getReviewPrompt(prTitle, prBody, diff) {
+  const system = `You are reviewing a pull request by examining unified diffs. You ONLY see the changed lines, not the full codebase.
 
 CRITICAL CONTEXT:
 - ⚠️ IMPORTANT: This code has ALREADY PASSED type checking (TypeScript/Flow/etc.) and linting (ESLint/TSLint/etc.)
@@ -379,6 +405,14 @@ CRITICAL CONTEXT:
 - Your role: Find logic bugs, security vulnerabilities, and critical errors that slip through other tools
 
 GOAL: Find REAL bugs and security vulnerabilities that would cause runtime failures or data breaches.
+
+COMPLETENESS REQUIREMENTS:
+- Review the ENTIRE diff before finalizing your answer.
+- Return the most complete set of distinct findings you can identify in this pass.
+- Do NOT stop after finding the first serious issue; continue checking the remaining files for additional independent issues.
+- Do NOT intentionally hold back issues for future runs.
+- If multiple observations stem from the same root cause, combine them into one finding with the clearest file/line reference.
+- Favor consistency across reruns: if the same diff is reviewed again, the findings list should stay as stable and comprehensive as possible.
 
 WHAT TO FLAG (only if you're 95%+ confident):
 ✅ Runtime bugs that would break in production:
@@ -440,6 +474,11 @@ SEVERITY GUIDELINES (use conservatively):
 
 TONE: Assume competence. The code has passed type checking and linting - trust that static analysis tools have done their job. If you're not CERTAIN something is a runtime bug or security vulnerability, don't report it. False positives for lint/type issues waste time and erode trust.
 
+FINAL SELF-CHECK BEFORE ANSWERING:
+- Re-scan the diff one more time for any additional distinct runtime or security issues you may have missed.
+- Ensure the final answer includes all issues you are confident about from this review pass.
+- Ensure each finding is specific, actionable, and non-duplicative.
+
 RESPONSE FORMAT: Provide your review in plain text with the following structure:
 
 OVERALL RISK: LOW|MEDIUM|HIGH|CRITICAL
@@ -462,25 +501,92 @@ Suggestion: Use parameterized queries: "SELECT * FROM users WHERE id = ?" with p
 
 If everything looks good, just provide a positive summary with "OVERALL RISK: LOW" and no issue markers.`
 
-    const user = [
-      {
-        role: 'user',
-        content: `Pull Request Title: ${prTitle}
+  const user = `Pull Request Title: ${prTitle}
 
 Pull Request Description:
 ${prBody}
 
 Unified Diff (truncated if large):
 ${diff}
-`,
-      },
-    ]
+`
+
+  return `${system}\n\nUser Request:\n${user}`
+}
+
+function printLocalJsonReport(report) {
+  console.log('AI_REVIEW_JSON_START')
+  console.log(JSON.stringify(report, null, 2))
+  console.log('AI_REVIEW_JSON_END')
+}
+
+function printLocalSummary(parsed, reportPath, report = null) {
+  console.log(asMarkdown(parsed))
+  console.log('')
+  console.log(`Report: ${reportPath}`)
+  if (report) {
+    console.log('')
+    printLocalJsonReport(report)
+  }
+}
+
+;(async () => {
+  try {
+    let reviewContext
+    if (isLocalMode) {
+      reviewContext = getLocalReviewContext()
+    } else {
+      const { data: pr } = await octo.pulls.get({ owner, repo, pull_number: prNumber })
+      const files = await octo.paginate(octo.pulls.listFiles, {
+        owner,
+        repo,
+        pull_number: prNumber,
+        per_page: 100,
+      })
+      const safeFiles = filterSafeFiles(files)
+      reviewContext = {
+        title: pr.title || '',
+        body: pr.body || '',
+        diff: formatUnifiedPatch(safeFiles),
+        workspaceDir: process.env.GITHUB_WORKSPACE || process.cwd(),
+        shouldPostComment: true,
+        shouldUpdateCheck: true,
+        prNumber,
+      }
+    }
+
+    const redactedDiff = sanitizeDiff(reviewContext.diff)
+    const diff = truncate(redactedDiff, parseInt(MAX_DIFF_CHARS, 10))
+
+    if (!diff.trim()) {
+      const parsed = {
+        summary: 'No reviewable code changes were found in the current diff.',
+        overall_risk: 'low',
+        issues: [],
+      }
+      const reportFileName = `ai-review-report-${Date.now()}.json`
+      const reportPath = `${reviewContext.workspaceDir}/${reportFileName}`
+      const fullReport = {
+        raw_response: parsed.summary,
+        parsed,
+        timestamp: new Date().toISOString(),
+        model: AI_MODEL,
+        mode: isLocalMode ? 'local' : 'github-action',
+      }
+      fs.writeFileSync(reportPath, JSON.stringify(fullReport, null, 2))
+      if (isLocalMode) {
+        printLocalSummary(parsed, reportPath, fullReport)
+      } else {
+        console.log('AI review passed (no reviewable diff).')
+      }
+      process.exit(0)
+    }
 
     console.log('🤖 AI Model being used:', AI_MODEL);
     console.log('🔄 Using responses API for plain text output...')
     const ai = await openai.responses.create({
       model: AI_MODEL,
-      input: system + '\n\nUser Request:\n' + user[0].content,
+      input: getReviewPrompt(reviewContext.title, reviewContext.body, diff),
+      temperature: 0,
       // No response_format specified = plain text output
     })
     console.log('✅ Responses API call succeeded')
@@ -506,14 +612,15 @@ ${diff}
     console.log(`📊 Found ${parsed.issues.length} issues with overall risk: ${parsed.overall_risk}`)
 
     // 3) Persist report for auditors (includes both raw text and parsed structure)
-    const workspaceDir = process.env.GITHUB_WORKSPACE || process.cwd()
+    const workspaceDir = reviewContext.workspaceDir
     const reportFileName = `ai-review-report-${Date.now()}.json`
     const reportPath = `${workspaceDir}/${reportFileName}`
     const fullReport = {
       raw_response: text,
       parsed: parsed,
       timestamp: new Date().toISOString(),
-      model: AI_MODEL
+      model: AI_MODEL,
+      mode: isLocalMode ? 'local' : 'github-action',
     }
     fs.writeFileSync(reportPath, JSON.stringify(fullReport, null, 2))
     console.log(`AI review report written to: ${reportPath}`)
@@ -524,30 +631,34 @@ ${diff}
     console.log(`       path: ${reportFileName}`)
 
     // 4) Post (or update) a single summary comment
-    const marker = '<!-- ai-code-review-bot -->'
-    const bodyMd = `${marker}\n${asMarkdown(parsed)}\n${marker}`
-    const allComments = await octo.paginate(octo.issues.listComments, {
-      owner,
-      repo,
-      issue_number: prNumber,
-      per_page: 100,
-    })
-    const botComment = allComments.find(c => c.body?.includes(marker))
+    if (reviewContext.shouldPostComment) {
+      const marker = '<!-- ai-code-review-bot -->'
+      const bodyMd = `${marker}\n${asMarkdown(parsed)}\n${marker}`
+      const allComments = await octo.paginate(octo.issues.listComments, {
+        owner,
+        repo,
+        issue_number: reviewContext.prNumber,
+        per_page: 100,
+      })
+      const botComment = allComments.find(c => c.body?.includes(marker))
 
-    if (botComment) {
-      await octo.issues.updateComment({
-        owner,
-        repo,
-        comment_id: botComment.id,
-        body: truncateComment(bodyMd),
-      })
+      if (botComment) {
+        await octo.issues.updateComment({
+          owner,
+          repo,
+          comment_id: botComment.id,
+          body: truncateComment(bodyMd),
+        })
+      } else {
+        await octo.issues.createComment({
+          owner,
+          repo,
+          issue_number: reviewContext.prNumber,
+          body: truncateComment(bodyMd),
+        })
+      }
     } else {
-      await octo.issues.createComment({
-        owner,
-        repo,
-        issue_number: prNumber,
-        body: truncateComment(bodyMd),
-      })
+      printLocalSummary(parsed, reportPath, fullReport)
     }
 
     // 5) Fail the check if any high-severity/security issues

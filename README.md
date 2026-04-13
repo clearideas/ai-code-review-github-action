@@ -9,6 +9,8 @@ Automated AI-powered code review using OpenAI GPT models for GitHub pull request
 - 📊 Configurable severity levels and failure conditions
 - 💬 Automatic PR comments with findings
 - 📋 JSON artifacts for audit trails
+- 🖥️ Local review mode for pre-push validation with stdout JSON output
+- 🎯 More stable reruns with deterministic review settings and completeness guidance
 - ✨ **NEW in v1.2.0:** Refined AI prompt reduces false positives and improves severity classification
 - ✨ **NEW in v1.1.0:** Robust plain-text parsing eliminates JSON encoding issues
 
@@ -56,7 +58,27 @@ jobs:
 ### Version Options
 
 - **`@latest`** - Always use the newest version (recommended for most users)
-- **`@v1.2.1`** - Pin to a specific version (recommended for production environments)
+- **`@v1.2.3`** - Pin to a specific version (recommended for production environments)
+
+## Local Review
+
+Run the same reviewer locally before pushing:
+
+```bash
+npm run review:local
+```
+
+Requirements:
+
+- `OPENAI_API_KEY` must be set in your shell
+- the current directory must be a git repository
+
+Optional environment variables:
+
+- `BASE_REF` - base ref for the diff range, defaults to `origin/main`
+
+The local run writes the same JSON report artifact to the repo root and exits non-zero when blocking severities are found.
+It also prints the JSON report to stdout between `AI_REVIEW_JSON_START` and `AI_REVIEW_JSON_END` markers for easy agent/tool consumption.
 
 ## Inputs
 
@@ -86,7 +108,16 @@ jobs:
 
 ## Changelog
 
-### v1.2.1 (Current)
+### v1.2.3 (Current)
+
+**Local Review & Stability Improvements:**
+- 🖥️ **Added local review mode**: Run the same reviewer locally with `npm run review:local`
+- 📄 **Added stdout JSON output**: Local runs now print the full report between `AI_REVIEW_JSON_START` and `AI_REVIEW_JSON_END`
+- 🔑 **Improved local env support**: Local review accepts standard `OPENAI_API_KEY`, not just GitHub Action inputs
+- 🎯 **Reduced rerun churn**: Added prompt instructions to return a comprehensive, stable set of findings in one pass
+- 🧊 **Made reviews more deterministic**: Sets `temperature: 0` to reduce issue drift between reruns
+
+### v1.2.1
 
 **Bug Fix:**
 - 🔧 **Fixed release workflow permissions**: Added `contents: write` permission to release workflow to fix GitHub Actions release creation errors
@@ -162,4 +193,3 @@ Previous versions used JSON structured output which occasionally failed when rev
 ## License
 
 MIT
-

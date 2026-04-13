@@ -133,6 +133,9 @@ pids
 # vuepress build output
 .vuepress/dist
 
+# Local AI review artifacts
+ai-review-report-*.json
+
 # Serverless directories
 .serverless/
 

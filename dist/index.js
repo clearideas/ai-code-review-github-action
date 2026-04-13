@@ -10428,6 +10428,7 @@ var init_fileFromPath = __esm({
 
 // src/review.js
 var import_node_fs2 = __toESM(require("node:fs"));
+var import_node_child_process = require("node:child_process");
 var import_rest = __toESM(require_dist_node12());
 
 // node_modules/openai/internal/qs/formats.mjs
@@ -17026,22 +17027,25 @@ OpenAI.Containers = Containers;
 OpenAI.ContainerListResponsesPage = ContainerListResponsesPage;
 
 // src/review.js
+var isLocalMode = process.argv.includes("--local");
 var {
   INPUT_GITHUB_TOKEN: GITHUB_TOKEN,
-  INPUT_OPENAI_API_KEY: OPENAI_API_KEY,
+  INPUT_OPENAI_API_KEY,
+  OPENAI_API_KEY,
   INPUT_AI_MODEL: AI_MODEL = "gpt-5-mini",
   INPUT_MAX_DIFF_CHARS: MAX_DIFF_CHARS = "180000",
   INPUT_FAIL_ON_SEVERITY: FAIL_ON_SEVERITY = '["high","critical","security"]',
   GITHUB_REPOSITORY
 } = process.env;
-if (!GITHUB_TOKEN) throw new Error("Missing github_token input");
-if (!OPENAI_API_KEY) throw new Error("Missing openai_api_key input");
-if (!GITHUB_REPOSITORY || !GITHUB_REPOSITORY.includes("/")) {
+var REVIEW_OPENAI_API_KEY = INPUT_OPENAI_API_KEY || OPENAI_API_KEY;
+if (!REVIEW_OPENAI_API_KEY) throw new Error("Missing openai_api_key input");
+if (!isLocalMode && !GITHUB_TOKEN) throw new Error("Missing github_token input");
+if (!isLocalMode && (!GITHUB_REPOSITORY || !GITHUB_REPOSITORY.includes("/"))) {
   throw new Error("Missing or invalid GITHUB_REPOSITORY (expected owner/repo)");
 }
-var [owner, repo] = GITHUB_REPOSITORY.split("/");
+var [owner, repo] = isLocalMode ? [null, null] : GITHUB_REPOSITORY.split("/");
 var prNumber;
-if (process.env.GITHUB_EVENT_PATH) {
+if (!isLocalMode && process.env.GITHUB_EVENT_PATH) {
   try {
     const event = JSON.parse(import_node_fs2.default.readFileSync(process.env.GITHUB_EVENT_PATH, "utf8"));
     prNumber = event.pull_request?.number;
@@ -17049,17 +17053,17 @@ if (process.env.GITHUB_EVENT_PATH) {
     console.warn("Could not read GitHub event:", error.message);
   }
 }
-if (!prNumber) {
+if (!isLocalMode && !prNumber) {
   prNumber = parseInt(
     process.env.GITHUB_REF?.match(/refs\/pull\/(\d+)\/merge/)?.[1] || process.env.GITHUB_REF_NAME || process.env.PR_NUMBER || "",
     10
   );
 }
-if (!Number.isInteger(prNumber)) {
+if (!isLocalMode && !Number.isInteger(prNumber)) {
   throw new Error("Unable to determine pull request number from GitHub event or environment");
 }
-var octo = new import_rest.Octokit({ auth: GITHUB_TOKEN });
-var openai = new OpenAI({ apiKey: OPENAI_API_KEY });
+var octo = isLocalMode ? null : new import_rest.Octokit({ auth: GITHUB_TOKEN });
+var openai = new OpenAI({ apiKey: REVIEW_OPENAI_API_KEY });
 var failOn;
 try {
   const parsed = JSON.parse(FAIL_ON_SEVERITY);
@@ -17080,6 +17084,13 @@ try {
 function truncate(str2, n2) {
   if (str2.length <= n2) return str2;
   return str2.slice(0, n2) + "\n\n[...diff truncated for token safety...]";
+}
+function runGit(args, options = {}) {
+  return (0, import_node_child_process.execFileSync)("git", args, {
+    encoding: "utf8",
+    cwd: options.cwd,
+    stdio: ["ignore", "pipe", "pipe"]
+  }).trimEnd();
 }
 var SENSITIVE_FILE_PATTERNS = [
   /(^|\/)\.env(\..*)?$/i,
@@ -17154,6 +17165,27 @@ function filterSafeFiles(files) {
   }
   console.log(`Including ${included.length} files in AI review`);
   return included;
+}
+function getLocalReviewContext() {
+  const repoRoot = runGit(["rev-parse", "--show-toplevel"]);
+  const baseRef = process.env.BASE_REF || "origin/main";
+  const mergeBase = runGit(["merge-base", baseRef, "HEAD"], { cwd: repoRoot });
+  const changedFiles = runGit(["diff", "--name-only", `${mergeBase}...HEAD`], { cwd: repoRoot }).split("\n").map((name) => name.trim()).filter(Boolean);
+  const safeFiles = filterSafeFiles(changedFiles.map((filename) => ({ filename })));
+  const includedFileNames = safeFiles.map((file) => file.filename);
+  const rawDiff = includedFileNames.length > 0 ? runGit(["diff", "--no-ext-diff", "--unified=3", `${mergeBase}...HEAD`, "--", ...includedFileNames], {
+    cwd: repoRoot
+  }) : "";
+  const branchName = runGit(["rev-parse", "--abbrev-ref", "HEAD"], { cwd: repoRoot });
+  return {
+    title: `Local review for ${branchName}`,
+    body: `Local AI review against base ref \`${baseRef}\` from branch \`${branchName}\`.`,
+    diff: rawDiff,
+    workspaceDir: repoRoot,
+    shouldPostComment: false,
+    shouldUpdateCheck: false,
+    prNumber: null
+  };
 }
 function sanitizeDiff(diffText) {
   let sanitized = diffText;
@@ -17298,22 +17330,8 @@ function extractIssuesFromText(text) {
     issues
   };
 }
-(async () => {
-  try {
-    const { data: pr2 } = await octo.pulls.get({ owner, repo, pull_number: prNumber });
-    const prBody = pr2.body || "";
-    const prTitle = pr2.title || "";
-    const files = await octo.paginate(octo.pulls.listFiles, {
-      owner,
-      repo,
-      pull_number: prNumber,
-      per_page: 100
-    });
-    const safeFiles = filterSafeFiles(files);
-    const rawDiff = formatUnifiedPatch(safeFiles);
-    const redactedDiff = sanitizeDiff(rawDiff);
-    const diff = truncate(redactedDiff, parseInt(MAX_DIFF_CHARS, 10));
-    const system = `You are reviewing a pull request by examining unified diffs. You ONLY see the changed lines, not the full codebase.
+function getReviewPrompt(prTitle, prBody, diff) {
+  const system = `You are reviewing a pull request by examining unified diffs. You ONLY see the changed lines, not the full codebase.
 
 CRITICAL CONTEXT:
 - \u26A0\uFE0F IMPORTANT: This code has ALREADY PASSED type checking (TypeScript/Flow/etc.) and linting (ESLint/TSLint/etc.)
@@ -17328,6 +17346,14 @@ CRITICAL CONTEXT:
 - Your role: Find logic bugs, security vulnerabilities, and critical errors that slip through other tools
 
 GOAL: Find REAL bugs and security vulnerabilities that would cause runtime failures or data breaches.
+
+COMPLETENESS REQUIREMENTS:
+- Review the ENTIRE diff before finalizing your answer.
+- Return the most complete set of distinct findings you can identify in this pass.
+- Do NOT stop after finding the first serious issue; continue checking the remaining files for additional independent issues.
+- Do NOT intentionally hold back issues for future runs.
+- If multiple observations stem from the same root cause, combine them into one finding with the clearest file/line reference.
+- Favor consistency across reruns: if the same diff is reviewed again, the findings list should stay as stable and comprehensive as possible.
 
 WHAT TO FLAG (only if you're 95%+ confident):
 \u2705 Runtime bugs that would break in production:
@@ -17389,6 +17415,11 @@ SEVERITY GUIDELINES (use conservatively):
 
 TONE: Assume competence. The code has passed type checking and linting - trust that static analysis tools have done their job. If you're not CERTAIN something is a runtime bug or security vulnerability, don't report it. False positives for lint/type issues waste time and erode trust.
 
+FINAL SELF-CHECK BEFORE ANSWERING:
+- Re-scan the diff one more time for any additional distinct runtime or security issues you may have missed.
+- Ensure the final answer includes all issues you are confident about from this review pass.
+- Ensure each finding is specific, actionable, and non-duplicative.
+
 RESPONSE FORMAT: Provide your review in plain text with the following structure:
 
 OVERALL RISK: LOW|MEDIUM|HIGH|CRITICAL
@@ -17410,24 +17441,88 @@ User input from req.body.id is directly concatenated into SQL query: "SELECT * F
 Suggestion: Use parameterized queries: "SELECT * FROM users WHERE id = ?" with prepared statement parameters.
 
 If everything looks good, just provide a positive summary with "OVERALL RISK: LOW" and no issue markers.`;
-    const user = [
-      {
-        role: "user",
-        content: `Pull Request Title: ${prTitle}
+  const user = `Pull Request Title: ${prTitle}
 
 Pull Request Description:
 ${prBody}
 
 Unified Diff (truncated if large):
 ${diff}
-`
+`;
+  return `${system}
+
+User Request:
+${user}`;
+}
+function printLocalJsonReport(report) {
+  console.log("AI_REVIEW_JSON_START");
+  console.log(JSON.stringify(report, null, 2));
+  console.log("AI_REVIEW_JSON_END");
+}
+function printLocalSummary(parsed, reportPath, report = null) {
+  console.log(asMarkdown(parsed));
+  console.log("");
+  console.log(`Report: ${reportPath}`);
+  if (report) {
+    console.log("");
+    printLocalJsonReport(report);
+  }
+}
+(async () => {
+  try {
+    let reviewContext;
+    if (isLocalMode) {
+      reviewContext = getLocalReviewContext();
+    } else {
+      const { data: pr2 } = await octo.pulls.get({ owner, repo, pull_number: prNumber });
+      const files = await octo.paginate(octo.pulls.listFiles, {
+        owner,
+        repo,
+        pull_number: prNumber,
+        per_page: 100
+      });
+      const safeFiles = filterSafeFiles(files);
+      reviewContext = {
+        title: pr2.title || "",
+        body: pr2.body || "",
+        diff: formatUnifiedPatch(safeFiles),
+        workspaceDir: process.env.GITHUB_WORKSPACE || process.cwd(),
+        shouldPostComment: true,
+        shouldUpdateCheck: true,
+        prNumber
+      };
+    }
+    const redactedDiff = sanitizeDiff(reviewContext.diff);
+    const diff = truncate(redactedDiff, parseInt(MAX_DIFF_CHARS, 10));
+    if (!diff.trim()) {
+      const parsed2 = {
+        summary: "No reviewable code changes were found in the current diff.",
+        overall_risk: "low",
+        issues: []
+      };
+      const reportFileName2 = `ai-review-report-${Date.now()}.json`;
+      const reportPath2 = `${reviewContext.workspaceDir}/${reportFileName2}`;
+      const fullReport2 = {
+        raw_response: parsed2.summary,
+        parsed: parsed2,
+        timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+        model: AI_MODEL,
+        mode: isLocalMode ? "local" : "github-action"
+      };
+      import_node_fs2.default.writeFileSync(reportPath2, JSON.stringify(fullReport2, null, 2));
+      if (isLocalMode) {
+        printLocalSummary(parsed2, reportPath2, fullReport2);
+      } else {
+        console.log("AI review passed (no reviewable diff).");
       }
-    ];
+      process.exit(0);
+    }
     console.log("\u{1F916} AI Model being used:", AI_MODEL);
     console.log("\u{1F504} Using responses API for plain text output...");
     const ai = await openai.responses.create({
       model: AI_MODEL,
-      input: system + "\n\nUser Request:\n" + user[0].content
+      input: getReviewPrompt(reviewContext.title, reviewContext.body, diff),
+      temperature: 0
       // No response_format specified = plain text output
     });
     console.log("\u2705 Responses API call succeeded");
@@ -17443,14 +17538,15 @@ ${diff}
     const parsed = extractIssuesFromText(text);
     console.log("\u2705 Successfully parsed AI response");
     console.log(`\u{1F4CA} Found ${parsed.issues.length} issues with overall risk: ${parsed.overall_risk}`);
-    const workspaceDir = process.env.GITHUB_WORKSPACE || process.cwd();
+    const workspaceDir = reviewContext.workspaceDir;
     const reportFileName = `ai-review-report-${Date.now()}.json`;
     const reportPath = `${workspaceDir}/${reportFileName}`;
     const fullReport = {
       raw_response: text,
       parsed,
       timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-      model: AI_MODEL
+      model: AI_MODEL,
+      mode: isLocalMode ? "local" : "github-action"
     };
     import_node_fs2.default.writeFileSync(reportPath, JSON.stringify(fullReport, null, 2));
     console.log(`AI review report written to: ${reportPath}`);
@@ -17459,31 +17555,35 @@ ${diff}
     console.log(`     with:`);
     console.log(`       name: ai-review-report`);
     console.log(`       path: ${reportFileName}`);
-    const marker = "<!-- ai-code-review-bot -->";
-    const bodyMd = `${marker}
+    if (reviewContext.shouldPostComment) {
+      const marker = "<!-- ai-code-review-bot -->";
+      const bodyMd = `${marker}
 ${asMarkdown(parsed)}
 ${marker}`;
-    const allComments = await octo.paginate(octo.issues.listComments, {
-      owner,
-      repo,
-      issue_number: prNumber,
-      per_page: 100
-    });
-    const botComment = allComments.find((c2) => c2.body?.includes(marker));
-    if (botComment) {
-      await octo.issues.updateComment({
+      const allComments = await octo.paginate(octo.issues.listComments, {
         owner,
         repo,
-        comment_id: botComment.id,
-        body: truncateComment(bodyMd)
+        issue_number: reviewContext.prNumber,
+        per_page: 100
       });
+      const botComment = allComments.find((c2) => c2.body?.includes(marker));
+      if (botComment) {
+        await octo.issues.updateComment({
+          owner,
+          repo,
+          comment_id: botComment.id,
+          body: truncateComment(bodyMd)
+        });
+      } else {
+        await octo.issues.createComment({
+          owner,
+          repo,
+          issue_number: reviewContext.prNumber,
+          body: truncateComment(bodyMd)
+        });
+      }
     } else {
-      await octo.issues.createComment({
-        owner,
-        repo,
-        issue_number: prNumber,
-        body: truncateComment(bodyMd)
-      });
+      printLocalSummary(parsed, reportPath, fullReport);
     }
     const shouldFail = parsed.issues.some((i2) => failOn.has(i2.severity));
     if (shouldFail) {
