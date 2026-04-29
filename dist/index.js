@@ -17032,9 +17032,14 @@ var {
   INPUT_GITHUB_TOKEN: GITHUB_TOKEN,
   INPUT_OPENAI_API_KEY,
   OPENAI_API_KEY,
-  INPUT_AI_MODEL: AI_MODEL = "gpt-5-mini",
+  INPUT_AI_MODEL: AI_MODEL = "gpt-5.5",
   INPUT_MAX_DIFF_CHARS: MAX_DIFF_CHARS = "180000",
+  INPUT_MAX_REVIEW_FILES: MAX_REVIEW_FILES = "100",
+  INPUT_MAX_OUTPUT_TOKENS: MAX_OUTPUT_TOKENS = "6000",
+  INPUT_REASONING_EFFORT: REASONING_EFFORT = "medium",
   INPUT_FAIL_ON_SEVERITY: FAIL_ON_SEVERITY = '["high","critical","security"]',
+  INPUT_REVIEW_INSTRUCTIONS: REVIEW_INSTRUCTIONS = "",
+  INPUT_MAX_REVIEW_INSTRUCTIONS_CHARS: MAX_REVIEW_INSTRUCTIONS_CHARS = "12000",
   GITHUB_REPOSITORY
 } = process.env;
 var REVIEW_OPENAI_API_KEY = INPUT_OPENAI_API_KEY || OPENAI_API_KEY;
@@ -17064,6 +17069,11 @@ if (!isLocalMode && !Number.isInteger(prNumber)) {
 }
 var octo = isLocalMode ? null : new import_rest.Octokit({ auth: GITHUB_TOKEN });
 var openai = new OpenAI({ apiKey: REVIEW_OPENAI_API_KEY });
+var maxDiffChars = parsePositiveInt(MAX_DIFF_CHARS, 18e4);
+var maxReviewFiles = Math.min(parsePositiveInt(MAX_REVIEW_FILES, 100), 100);
+var maxOutputTokens = parsePositiveInt(MAX_OUTPUT_TOKENS, 6e3);
+var validReasoningEfforts = /* @__PURE__ */ new Set(["low", "medium", "high"]);
+var reasoningEffort = validReasoningEfforts.has(REASONING_EFFORT) ? REASONING_EFFORT : "medium";
 var failOn;
 try {
   const parsed = JSON.parse(FAIL_ON_SEVERITY);
@@ -17085,12 +17095,31 @@ function truncate(str2, n2) {
   if (str2.length <= n2) return str2;
   return str2.slice(0, n2) + "\n\n[...diff truncated for token safety...]";
 }
+function truncateWithMetadata(str2, n2) {
+  return {
+    text: truncate(str2, n2),
+    truncated: str2.length > n2,
+    originalChars: str2.length,
+    maxChars: n2
+  };
+}
+function parsePositiveInt(value, fallback) {
+  const parsed = parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
 function runGit(args, options = {}) {
   return (0, import_node_child_process.execFileSync)("git", args, {
     encoding: "utf8",
     cwd: options.cwd,
     stdio: ["ignore", "pipe", "pipe"]
   }).trimEnd();
+}
+function cleanInstructions(text, maxChars) {
+  return truncate(sanitizeDiff(text.trim()), maxChars);
+}
+function getReviewInstructions() {
+  const maxChars = parsePositiveInt(MAX_REVIEW_INSTRUCTIONS_CHARS, 12e3);
+  return REVIEW_INSTRUCTIONS.trim() ? cleanInstructions(REVIEW_INSTRUCTIONS, maxChars) : "";
 }
 var SENSITIVE_FILE_PATTERNS = [
   /(^|\/)\.env(\..*)?$/i,
@@ -17161,7 +17190,10 @@ function filterSafeFiles(files) {
   }
   if (excluded.length > 0) {
     console.log(`Excluded ${excluded.length} files from AI review:`);
-    excluded.forEach((reason) => console.log(`  - ${reason}`));
+    excluded.slice(0, 20).forEach((reason) => console.log(`  - ${reason}`));
+    if (excluded.length > 20) {
+      console.log(`  - ...and ${excluded.length - 20} more`);
+    }
   }
   console.log(`Including ${included.length} files in AI review`);
   return included;
@@ -17181,6 +17213,19 @@ function getLocalReviewContext() {
     title: `Local review for ${branchName}`,
     body: `Local AI review against base ref \`${baseRef}\` from branch \`${branchName}\`.`,
     diff: rawDiff,
+    diffMetadata: {
+      totalChangedFiles: changedFiles.length,
+      reviewedFiles: includedFileNames.length,
+      excludedFiles: changedFiles.length - includedFileNames.length,
+      fileListCapped: false,
+      maxReviewFiles: null,
+      oversizedFiles: [],
+      diffCappedByBuilder: false,
+      diffTruncated: false,
+      originalDiffChars: rawDiff.length,
+      maxDiffChars
+    },
+    reviewInstructions: getReviewInstructions(),
     workspaceDir: repoRoot,
     shouldPostComment: false,
     shouldUpdateCheck: false,
@@ -17203,11 +17248,13 @@ function sanitizeDiff(diffText) {
   });
   return sanitized;
 }
-function formatUnifiedPatch(files) {
+function formatUnifiedPatch(files, maxChars) {
   let out = "";
   let totalSize = 0;
-  const maxFileSize = 5e4;
-  const maxTotalSize = 15e4;
+  const maxFileSize = Math.min(25e3, maxChars);
+  const maxTotalSize = maxChars;
+  const oversizedFiles = [];
+  let diffCappedByBuilder = false;
   for (const f2 of files) {
     if (!f2.patch) continue;
     if (f2.patch.length > maxFileSize) {
@@ -17216,12 +17263,14 @@ function formatUnifiedPatch(files) {
 +++ b/${f2.filename}
 [File too large for review]
 `;
+      oversizedFiles.push(f2.filename);
       continue;
     }
     if (totalSize + f2.patch.length > maxTotalSize) {
       out += `
 [Additional files truncated for size]
 `;
+      diffCappedByBuilder = true;
       break;
     }
     out += `
@@ -17231,15 +17280,59 @@ ${f2.patch}
 `;
     totalSize += f2.patch.length;
   }
-  return out;
+  return {
+    diff: out,
+    metadata: {
+      oversizedFiles,
+      diffCappedByBuilder,
+      originalDiffChars: out.length,
+      maxDiffChars: maxChars
+    }
+  };
+}
+async function createReviewResponse(params) {
+  try {
+    return await openai.responses.create(params);
+  } catch (error) {
+    const message = `${error.message || ""} ${error.error?.message || ""}`;
+    const unsupportedFastOption = /reasoning|max_output_tokens|temperature|store/i.test(message) && /unsupported|unknown|invalid|not supported|unrecognized/i.test(message);
+    if (!unsupportedFastOption) throw error;
+    console.warn("Fast response options were not accepted by this model; retrying with compatibility options.");
+    const { reasoning, max_output_tokens, temperature, store, ...compatParams } = params;
+    return openai.responses.create(compatParams);
+  }
 }
 function escapeMarkdown(text) {
   return text.replace(/[[\\\]`*_{}()#+\-.!]/g, "\\$&");
 }
-function asMarkdown(review) {
+function formatDiffNotice(metadata) {
+  if (!metadata) return [];
+  const notices = [];
+  if (metadata.fileListCapped) {
+    notices.push(
+      `Only the first ${metadata.fetchedFiles || metadata.maxReviewFiles} of ${metadata.totalChangedFiles} changed files were fetched for review.`
+    );
+  }
+  if (metadata.diffCappedByBuilder || metadata.diffTruncated) {
+    notices.push(
+      `The diff was truncated to ${metadata.maxDiffChars} characters from ${metadata.originalDiffChars} characters.`
+    );
+  }
+  if (metadata.oversizedFiles?.length) {
+    notices.push(`${metadata.oversizedFiles.length} oversized file diff(s) were skipped.`);
+  }
+  return notices;
+}
+function asMarkdown(review, diffMetadata = null) {
   const lines = [];
   lines.push(`### \u{1F916} AI Code Review (${review.overall_risk.toUpperCase()})`);
   lines.push("");
+  const diffNotices = formatDiffNotice(diffMetadata);
+  if (diffNotices.length) {
+    lines.push("**Review coverage note:**");
+    diffNotices.forEach((notice) => lines.push(`- ${escapeMarkdown(notice)}`));
+    lines.push("");
+  }
   lines.push(escapeMarkdown(review.summary));
   lines.push("");
   if (!review.issues.length) {
@@ -17330,117 +17423,99 @@ function extractIssuesFromText(text) {
     issues
   };
 }
-function getReviewPrompt(prTitle, prBody, diff) {
-  const system = `You are reviewing a pull request by examining unified diffs. You ONLY see the changed lines, not the full codebase.
+var reviewResponseSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["summary", "overall_risk", "issues"],
+  properties: {
+    summary: {
+      type: "string",
+      description: "Brief encouraging summary of the review outcome."
+    },
+    overall_risk: {
+      type: "string",
+      enum: ["low", "medium", "high", "critical"]
+    },
+    issues: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["file", "line", "severity", "title", "detail", "suggestion", "tags"],
+        properties: {
+          file: { type: "string" },
+          line: {
+            type: ["integer", "null"]
+          },
+          severity: {
+            type: "string",
+            enum: ["info", "low", "medium", "high", "critical", "security"]
+          },
+          title: { type: "string" },
+          detail: { type: "string" },
+          suggestion: {
+            type: ["string", "null"]
+          },
+          tags: {
+            type: ["array", "null"],
+            items: { type: "string" }
+          }
+        }
+      }
+    }
+  }
+};
+function normalizeReview(parsed) {
+  const issues = Array.isArray(parsed.issues) ? parsed.issues : [];
+  return {
+    summary: typeof parsed.summary === "string" && parsed.summary.trim() ? parsed.summary.trim() : "AI review completed",
+    overall_risk: ["low", "medium", "high", "critical"].includes(parsed.overall_risk) ? parsed.overall_risk : "low",
+    issues: issues.filter((issue) => issue && typeof issue === "object").map((issue) => ({
+      file: typeof issue.file === "string" && issue.file.trim() ? issue.file.trim() : "unknown",
+      line: Number.isInteger(issue.line) ? issue.line : null,
+      severity: ["info", "low", "medium", "high", "critical", "security"].includes(issue.severity) ? issue.severity : "info",
+      title: typeof issue.title === "string" && issue.title.trim() ? issue.title.trim() : "Issue detected",
+      detail: typeof issue.detail === "string" && issue.detail.trim() ? issue.detail.trim() : "Issue detected in code review requiring attention.",
+      suggestion: typeof issue.suggestion === "string" && issue.suggestion.trim() ? issue.suggestion.trim() : null,
+      tags: Array.isArray(issue.tags) ? issue.tags.filter((tag) => typeof tag === "string") : null
+    }))
+  };
+}
+function parseReviewResponse(text) {
+  try {
+    return normalizeReview(JSON.parse(text));
+  } catch (error) {
+    console.warn("Structured review JSON parse failed, falling back to text parser:", error.message);
+    return extractIssuesFromText(text);
+  }
+}
+function getReviewPrompt(prTitle, prBody, diff, reviewInstructions = "") {
+  const system = `Review this pull request from unified diffs only. Assume type checks, linting, and formatting already passed.
 
-CRITICAL CONTEXT:
-- \u26A0\uFE0F IMPORTANT: This code has ALREADY PASSED type checking (TypeScript/Flow/etc.) and linting (ESLint/TSLint/etc.)
-  * All type errors have been resolved - DO NOT flag type-related issues
-  * All linting errors have been resolved - DO NOT flag style, formatting, or linting issues
-  * If something compiles and passes lint, assume it's correct from a static analysis perspective
-- You only see DIFFS (changed lines), not complete files. This means:
-  * Imports/types may exist elsewhere - DO NOT flag "missing imports" or "undefined types"
-  * Existing code patterns and context are not visible to you
-  * Assume standard tooling (TypeScript, ESLint, etc.) already handles static analysis
-- Other tools are running: type checkers, linters, formatters already catch most issues
-- Your role: Find logic bugs, security vulnerabilities, and critical errors that slip through other tools
+Flag only high-confidence issues that can cause production bugs, security exposure, data loss/corruption, crashes, or clear runtime/build failures visible in the diff.
 
-GOAL: Find REAL bugs and security vulnerabilities that would cause runtime failures or data breaches.
+Good findings include:
+- Logic errors, wrong conditions, off-by-one mistakes, race/resource problems, infinite loops, and serious performance hotspots.
+- SQL/NoSQL injection, XSS, hardcoded secrets, insecure randomness, auth/authz bypasses, and unsafe trust boundaries.
+- Critical missing validation/error handling only when it can corrupt data, expose data, or crash an important path.
+- Missing imports/undefined symbols only when the changed lines clearly introduce a new symbol that is not imported, declared, auto-imported, globally available, or namespace-qualified.
+- Repo convention violations only when the repo-specific instructions explicitly say they matter.
 
-COMPLETENESS REQUIREMENTS:
-- Review the ENTIRE diff before finalizing your answer.
-- Return the most complete set of distinct findings you can identify in this pass.
-- Do NOT stop after finding the first serious issue; continue checking the remaining files for additional independent issues.
-- Do NOT intentionally hold back issues for future runs.
-- If multiple observations stem from the same root cause, combine them into one finding with the clearest file/line reference.
-- Favor consistency across reruns: if the same diff is reviewed again, the findings list should stay as stable and comprehensive as possible.
+Do not report style, formatting, naming, missing tests/docs, refactors, theoretical risks, type-only issues, unused code, or anything standard linters/type checkers should catch.
 
-WHAT TO FLAG (only if you're 95%+ confident):
-\u2705 Runtime bugs that would break in production:
-   - Logic errors causing incorrect behavior (off-by-one, wrong conditions)
-   - Race conditions or concurrency issues
-   - Memory leaks or resource exhaustion
-   - Infinite loops or performance hotspots (NOT micro-optimizations)
+Use conservative severities:
+- security: active vulnerability or data exposure.
+- critical: immediate production failure or data loss.
+- high: serious incorrect behavior or likely crash.
+- medium: intermittent failure or degraded functionality.
+- low/info: rare edge cases or useful non-blocking observations.
 
-\u2705 Security vulnerabilities (actual, not theoretical):
-   - SQL injection (user input concatenated into queries)
-   - XSS vulnerabilities (unsanitized user input in HTML/JS)
-   - Hardcoded secrets, passwords, API keys
-   - Insecure random number generation (crypto)
-   - Authorization bypasses (missing permission checks)
+Prefer repo-specific instructions over generic assumptions. Combine duplicate root causes. Return all distinct high-confidence findings, or an empty issues array if the diff looks safe. Return only JSON matching the schema.`;
+  const repoContext = reviewInstructions ? `
 
-\u2705 Critical error handling gaps:
-   - Unhandled exceptions that would crash the application
-   - Missing validation that could corrupt data
-
-\u274C DO NOT FLAG (these are handled by type checkers and linters):
-   - Type errors, type mismatches, or "any" types (TypeScript already checked this)
-   - Missing type annotations or type definitions (type checker handles this)
-   - Type narrowing issues or type guards (type checker validates this)
-   - Missing imports, types, or "undefined" references (they exist elsewhere and type checker verified)
-   - Unused variables, imports, or dead code (linter catches this)
-   - Code style, formatting, indentation, spacing (linter/formatter handles this)
-   - Naming conventions, variable naming, function naming (linter enforces this)
-   - Missing semicolons, trailing commas, quote style (linter/formatter fixes this)
-   - Missing return type annotations (type checker infers and validates)
-   - Generic type parameters or type constraints (type checker validates)
-   - Missing tests or documentation
-   - Code complexity or refactoring suggestions
-   - Theoretical security concerns ("could potentially")
-   - Config files or build artifacts
-   - Redacted values like [REDACTED_AWS_KEY]
-   - Architectural patterns or design choices
-   - Missing error handling for edge cases (only flag critical gaps)
-   - Performance micro-optimizations
-   - "Consider adding..." or "might want to..." suggestions
-   - Issues that would be caught by ESLint, TSLint, Prettier, or similar tools
-
-SEVERITY GUIDELINES (use conservatively):
-[SECURITY] - Active vulnerability that allows unauthorized access or data breach
-  Examples: SQL injection, XSS, hardcoded secrets, auth bypass
-  
-[CRITICAL] - Bug that would cause immediate production failure or data loss
-  Examples: Null pointer in critical path, infinite loop, memory exhaustion
-  
-[HIGH] - Serious bug that causes incorrect behavior or frequent crashes
-  Examples: Logic error causing wrong results, missing validation causing data corruption
-  
-[MEDIUM] - Bug that causes occasional failures or degraded functionality
-  Examples: Race condition causing intermittent issues, resource leak
-  
-[LOW] - Minor issue that may cause problems in edge cases
-  Examples: Potential null dereference in rarely-executed path
-
-[INFO] - Rarely use - only for genuinely helpful suggestions, not required fixes
-
-TONE: Assume competence. The code has passed type checking and linting - trust that static analysis tools have done their job. If you're not CERTAIN something is a runtime bug or security vulnerability, don't report it. False positives for lint/type issues waste time and erode trust.
-
-FINAL SELF-CHECK BEFORE ANSWERING:
-- Re-scan the diff one more time for any additional distinct runtime or security issues you may have missed.
-- Ensure the final answer includes all issues you are confident about from this review pass.
-- Ensure each finding is specific, actionable, and non-duplicative.
-
-RESPONSE FORMAT: Provide your review in plain text with the following structure:
-
-OVERALL RISK: LOW|MEDIUM|HIGH|CRITICAL
-
-Brief, encouraging summary of the code review.
-
-For each issue found, use this format:
-[SEVERITY] Issue Title - path/to/file.js:123
-Detailed explanation of the issue.
-Suggestion: Actionable suggestion to fix the issue.
-
-Example:
-OVERALL RISK: LOW
-
-Great work! The code changes look solid.
-
-[SECURITY] SQL Injection Vulnerability - src/api/users.js:45
-User input from req.body.id is directly concatenated into SQL query: "SELECT * FROM users WHERE id = " + req.body.id
-Suggestion: Use parameterized queries: "SELECT * FROM users WHERE id = ?" with prepared statement parameters.
-
-If everything looks good, just provide a positive summary with "OVERALL RISK: LOW" and no issue markers.`;
+Repository-specific review instructions:
+${reviewInstructions}
+` : "";
   const user = `Pull Request Title: ${prTitle}
 
 Pull Request Description:
@@ -17449,7 +17524,7 @@ ${prBody}
 Unified Diff (truncated if large):
 ${diff}
 `;
-  return `${system}
+  return `${system}${repoContext}
 
 User Request:
 ${user}`;
@@ -17460,7 +17535,7 @@ function printLocalJsonReport(report) {
   console.log("AI_REVIEW_JSON_END");
 }
 function printLocalSummary(parsed, reportPath, report = null) {
-  console.log(asMarkdown(parsed));
+  console.log(asMarkdown(parsed, report?.diff_metadata));
   console.log("");
   console.log(`Report: ${reportPath}`);
   if (report) {
@@ -17475,17 +17550,37 @@ function printLocalSummary(parsed, reportPath, report = null) {
       reviewContext = getLocalReviewContext();
     } else {
       const { data: pr2 } = await octo.pulls.get({ owner, repo, pull_number: prNumber });
-      const files = await octo.paginate(octo.pulls.listFiles, {
+      const { data: files } = await octo.pulls.listFiles({
         owner,
         repo,
         pull_number: prNumber,
-        per_page: 100
+        per_page: maxReviewFiles
       });
+      const changedFilesCount = pr2.changed_files ?? files.length;
+      const fileListCapped = changedFilesCount > files.length;
+      if (fileListCapped) {
+        console.log(`Review file list capped at ${maxReviewFiles} files for speed.`);
+      }
       const safeFiles = filterSafeFiles(files);
+      const patch = formatUnifiedPatch(safeFiles, maxDiffChars);
       reviewContext = {
         title: pr2.title || "",
         body: pr2.body || "",
-        diff: formatUnifiedPatch(safeFiles),
+        diff: patch.diff,
+        diffMetadata: {
+          totalChangedFiles: changedFilesCount,
+          fetchedFiles: files.length,
+          reviewedFiles: safeFiles.length,
+          excludedFiles: files.length - safeFiles.length,
+          fileListCapped,
+          maxReviewFiles,
+          oversizedFiles: patch.metadata.oversizedFiles,
+          diffCappedByBuilder: patch.metadata.diffCappedByBuilder,
+          diffTruncated: false,
+          originalDiffChars: patch.metadata.originalDiffChars,
+          maxDiffChars
+        },
+        reviewInstructions: getReviewInstructions(),
         workspaceDir: process.env.GITHUB_WORKSPACE || process.cwd(),
         shouldPostComment: true,
         shouldUpdateCheck: true,
@@ -17493,7 +17588,17 @@ function printLocalSummary(parsed, reportPath, report = null) {
       };
     }
     const redactedDiff = sanitizeDiff(reviewContext.diff);
-    const diff = truncate(redactedDiff, parseInt(MAX_DIFF_CHARS, 10));
+    const truncatedDiff = truncateWithMetadata(redactedDiff, maxDiffChars);
+    const diff = truncatedDiff.text;
+    const diffMetadata = {
+      ...reviewContext.diffMetadata,
+      diffTruncated: reviewContext.diffMetadata?.diffTruncated || truncatedDiff.truncated,
+      originalDiffChars: Math.max(
+        reviewContext.diffMetadata?.originalDiffChars || 0,
+        truncatedDiff.originalChars
+      ),
+      maxDiffChars
+    };
     if (!diff.trim()) {
       const parsed2 = {
         summary: "No reviewable code changes were found in the current diff.",
@@ -17507,7 +17612,8 @@ function printLocalSummary(parsed, reportPath, report = null) {
         parsed: parsed2,
         timestamp: (/* @__PURE__ */ new Date()).toISOString(),
         model: AI_MODEL,
-        mode: isLocalMode ? "local" : "github-action"
+        mode: isLocalMode ? "local" : "github-action",
+        diff_metadata: diffMetadata
       };
       import_node_fs2.default.writeFileSync(reportPath2, JSON.stringify(fullReport2, null, 2));
       if (isLocalMode) {
@@ -17518,24 +17624,34 @@ function printLocalSummary(parsed, reportPath, report = null) {
       process.exit(0);
     }
     console.log("\u{1F916} AI Model being used:", AI_MODEL);
-    console.log("\u{1F504} Using responses API for plain text output...");
-    const ai = await openai.responses.create({
+    if (reviewContext.reviewInstructions) {
+      console.log("\u{1F4DA} Loaded repository-specific review instructions");
+    }
+    console.log("\u{1F504} Using responses API with structured review output...");
+    const ai = await createReviewResponse({
       model: AI_MODEL,
-      input: getReviewPrompt(reviewContext.title, reviewContext.body, diff),
-      temperature: 0
-      // No response_format specified = plain text output
+      input: getReviewPrompt(reviewContext.title, reviewContext.body, diff, reviewContext.reviewInstructions),
+      temperature: 0,
+      max_output_tokens: maxOutputTokens,
+      reasoning: { effort: reasoningEffort },
+      store: false,
+      text: {
+        format: {
+          type: "json_schema",
+          name: "ai_code_review",
+          strict: true,
+          schema: reviewResponseSchema
+        }
+      }
     });
     console.log("\u2705 Responses API call succeeded");
-    console.log("\u{1F50D} Full AI response structure:", JSON.stringify(ai, null, 2));
     const text = ai.output_text || ai.response?.content || ai.content;
     if (!text || text.trim() === "") {
       console.error("\u274C AI returned empty response");
-      console.error("\u274C Response structure:", JSON.stringify(ai, null, 2));
       throw new Error("AI returned empty response");
     }
     console.log("\u{1F4DD} AI Response length:", text.length);
-    console.log("\u{1F4DD} AI Response preview:", text.substring(0, 500));
-    const parsed = extractIssuesFromText(text);
+    const parsed = parseReviewResponse(text);
     console.log("\u2705 Successfully parsed AI response");
     console.log(`\u{1F4CA} Found ${parsed.issues.length} issues with overall risk: ${parsed.overall_risk}`);
     const workspaceDir = reviewContext.workspaceDir;
@@ -17546,7 +17662,8 @@ function printLocalSummary(parsed, reportPath, report = null) {
       parsed,
       timestamp: (/* @__PURE__ */ new Date()).toISOString(),
       model: AI_MODEL,
-      mode: isLocalMode ? "local" : "github-action"
+      mode: isLocalMode ? "local" : "github-action",
+      diff_metadata: diffMetadata
     };
     import_node_fs2.default.writeFileSync(reportPath, JSON.stringify(fullReport, null, 2));
     console.log(`AI review report written to: ${reportPath}`);
@@ -17558,7 +17675,7 @@ function printLocalSummary(parsed, reportPath, report = null) {
     if (reviewContext.shouldPostComment) {
       const marker = "<!-- ai-code-review-bot -->";
       const bodyMd = `${marker}
-${asMarkdown(parsed)}
+${asMarkdown(parsed, diffMetadata)}
 ${marker}`;
       const allComments = await octo.paginate(octo.issues.listComments, {
         owner,

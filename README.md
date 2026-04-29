@@ -11,6 +11,8 @@ Automated AI-powered code review using OpenAI GPT models for GitHub pull request
 - 📋 JSON artifacts for audit trails
 - 🖥️ Local review mode for pre-push validation with stdout JSON output
 - 🎯 More stable reruns with deterministic review settings and completeness guidance
+- 🧱 Structured JSON output from the Responses API for reliable parsing
+- 📚 Repository-specific review instructions through a workflow input
 - ✨ **NEW in v1.2.0:** Refined AI prompt reduces false positives and improves severity classification
 - ✨ **NEW in v1.1.0:** Robust plain-text parsing eliminates JSON encoding issues
 
@@ -42,9 +44,14 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           openai_api_key: ${{ secrets.OPENAI_API_KEY }}
           # Optional customization:
-          ai_model: 'gpt-5-mini'
+          ai_model: 'gpt-5.5'
           max_diff_chars: '180000'
+          max_review_files: '100'
+          max_output_tokens: '6000'
+          reasoning_effort: 'medium'
           fail_on_severity: '["high","critical","security"]'
+          review_instructions: |
+            Project-specific context for this repository.
       
       # Optional: Upload the detailed JSON report as an artifact
       - name: Upload AI Review Report
@@ -58,7 +65,7 @@ jobs:
 ### Version Options
 
 - **`@latest`** - Always use the newest version (recommended for most users)
-- **`@v1.2.3`** - Pin to a specific version (recommended for production environments)
+- **`@v1.2.4`** - Pin to a specific version (recommended for production environments)
 
 ## Local Review
 
@@ -86,9 +93,27 @@ It also prints the JSON report to stdout between `AI_REVIEW_JSON_START` and `AI_
 |-------|-------------|----------|---------|
 | `github_token` | GitHub token for API access | Yes | `${{ secrets.GITHUB_TOKEN }}` |
 | `openai_api_key` | OpenAI API key | Yes | - |
-| `ai_model` | OpenAI model to use | No | `gpt-5-mini` |
+| `ai_model` | OpenAI model to use | No | `gpt-5.5` |
 | `max_diff_chars` | Max characters in diff | No | `180000` |
+| `max_review_files` | Max changed files to fetch from the PR | No | `100` |
+| `max_output_tokens` | Max model output tokens for the review | No | `6000` |
+| `reasoning_effort` | Reasoning effort for supported models: `low`, `medium`, or `high` | No | `medium` |
 | `fail_on_severity` | Severities that fail the check | No | `["high","critical","security"]` |
+| `review_instructions` | Inline repository-specific review instructions | No | - |
+| `max_review_instructions_chars` | Max characters of review instructions to send | No | `12000` |
+
+## Repository Instructions
+
+For repo-specific context, pass `review_instructions` in the workflow. This keeps the review background explicit in CI configuration and avoids relying on repository checkout.
+
+Use this for architectural facts and project-specific false-positive guidance:
+
+```yaml
+with:
+  review_instructions: |
+    Controllers receive already validated input from route middleware; do not request duplicate validation in controllers unless a route lacks validation middleware.
+    Missing imports in changed Vue files are valid review findings when the diff clearly introduces a new unimported symbol.
+```
 
 ## Setup
 
@@ -108,7 +133,17 @@ It also prints the JSON report to stdout between `AI_REVIEW_JSON_START` and `AI_
 
 ## Changelog
 
-### v1.2.3 (Current)
+### v1.2.4
+
+**Model & Parsing Improvements:**
+- 🤖 **Updated default model**: Default reviewer model is now `gpt-5.5`
+- 🧱 **Structured review output**: Uses strict JSON schema output through the Responses API instead of relying on plain-text formatting
+- 🧼 **Reduced CI log exposure**: Stops logging the full model response body to GitHub Actions output
+- 🟢 **Aligned build target**: Bundles for Node 20 to match the declared GitHub Action runtime
+- 📚 **Added repo-specific instructions**: Supports a `review_instructions` workflow input and injects it into the prompt
+- ⚡ **Improved review efficiency**: Caps fetched files, uses bounded output, keeps medium reasoning by default, disables response storage, and reports PR coverage truncation in the review comment
+
+### v1.2.3
 
 **Local Review & Stability Improvements:**
 - 🖥️ **Added local review mode**: Run the same reviewer locally with `npm run review:local`

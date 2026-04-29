@@ -18,17 +18,42 @@ inputs:
   ai_model:
     description: 'OpenAI model to use for code review'
     required: false
-    default: gpt-5-mini
+    default: gpt-5.5
   
   max_diff_chars:
     description: 'Maximum number of characters in diff to send to AI'
     required: false
     default: 180000
+
+  max_review_files:
+    description: 'Maximum number of changed files to fetch from the pull request for review'
+    required: false
+    default: 100
+
+  max_output_tokens:
+    description: 'Maximum model output tokens for the review response'
+    required: false
+    default: 6000
+
+  reasoning_effort:
+    description: 'Reasoning effort for models that support it: low, medium, or high'
+    required: false
+    default: medium
   
   fail_on_severity:
     description: 'JSON array of severities that should fail the check'
     required: false
     default: '["high","critical","security"]'
+
+  review_instructions:
+    description: 'Additional repository-specific review instructions to inject into the prompt'
+    required: false
+    default: ''
+
+  max_review_instructions_chars:
+    description: 'Maximum number of characters of repository review instructions to send to AI'
+    required: false
+    default: 12000
 
 runs:
   using: 'node20'
