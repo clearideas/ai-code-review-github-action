@@ -12,12 +12,12 @@ jobs:
       contents: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: "20"
+          node-version: "24"
           cache: "npm"
 
       - name: Install dependencies
@@ -32,7 +32,7 @@ jobs:
           tar -czf ai-code-review-github-action.tar.gz -C . --exclude=.git --exclude=node_modules --exclude=.github *
 
       - name: Create Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: ./ai-code-review-github-action.tar.gz
           generate_release_notes: true
